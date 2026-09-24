@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Studio editor</title>
+<!-- inline:style editor.css -->
+</head>
+<body>
+<a class="skip" href="#main">Skip to the editor</a>
+<header class="top">
+  <a class="brand" href="#/">Studio editor</a>
+  <div id="project-bar" class="project-bar" hidden>
+    <a href="#/" class="crumb">Projects</a>
+    <strong id="project-name" class="pname"></strong>
+    <button type="button" id="rename-here" class="quiet" aria-label="Rename this project">Rename</button>
+    <span id="save-state" class="save-state" role="status" data-state="saved">Saved</span>
+    <button type="button" id="save" class="primary" title="Save (Ctrl+S)" disabled>Save</button>
+    <details id="export" class="export">
+      <summary>Export</summary>
+      <div class="panel">
+        <label class="check"><input type="checkbox" id="burn"> Burn subtitles into the picture</label>
+        <p class="muted small">Off by default: the video gets a separate subtitle track, and the .srt and .vtt files are written next to it.</p>
+        <button type="button" id="export-go" class="primary">Export video</button>
+        <progress id="export-bar" max="100" value="0" hidden aria-label="Export progress"></progress>
+        <p id="export-status" class="small" role="status"></p>
+        <p id="export-links" class="links"></p>
+      </div>
+    </details>
+  </div>
+</header>
+<div id="banner" class="banner" hidden></div>
+<div id="toast" class="toast" hidden role="status"></div>
+<div id="live" class="sr" aria-live="polite"></div>
+<main id="main">
+  <div id="home" class="home"></div>
+  <div id="editor" hidden>
+    <section class="stage" aria-label="Preview">
+      <div class="player">
+        <video id="video" playsinline preload="metadata" hidden></video>
+        <div id="black" class="black"></div>
+        <div id="subtitle-overlay" class="subtitle-overlay" hidden></div>
+      </div>
+      <div class="transport">
+        <button type="button" id="play" aria-pressed="false" title="Play or pause (Space)">Play</button>
+        <output id="time" class="time">0:00.0 / 0:00.0</output>
+      </div>
+    </section>
+    <div class="toolbar" role="toolbar" aria-label="Editing tools">
+      <button type="button" id="split" title="Split at the playhead (S)">Split <kbd>S</kbd></button>
+      <button type="button" id="copy" title="Copy the selected clip (Ctrl+C)">Copy <kbd>Ctrl+C</kbd></button>
+      <button type="button" id="paste" title="Paste at the playhead (Ctrl+V)">Paste <kbd>Ctrl+V</kbd></button>
+      <button type="button" id="duplicate" title="Duplicate after the clip (Ctrl+D)">Duplicate <kbd>Ctrl+D</kbd></button>
+      <button type="button" id="delete" title="Delete the selected clip (Del)">Delete <kbd>Del</kbd></button>
+      <label class="check"><input type="checkbox" id="ripple"> Ripple</label>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button type="button" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="zoom-out" title="Zoom out (-)" aria-label="Zoom out">-</button>
+      <button type="button" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      <button type="button" id="fit" title="Fit the whole video">Fit</button>
+    </div>
+    <div id="timeline-wrap" class="timeline-wrap"><div id="timeline" aria-label="Timeline"></div></div>
+    <section class="lower">
+      <div class="card"><h2>Selected clip</h2><div id="inspector"></div></div>
+      <div class="card">
+        <h2>Add</h2>
+        <div class="row"><button type="button" id="add-sub">Subtitle at the playhead</button></div>
+        <div class="row">
+          <select id="media-select" aria-label="Media file"></select>
+          <select id="media-layer" aria-label="Layer"></select>
+          <button type="button" id="add-media">Add at the playhead</button>
+        </div>
+        <p class="muted small">Shortcuts: S split, Ctrl+C / Ctrl+V copy and paste, Ctrl+D duplicate, Del delete, Ctrl+Z undo, Space play, arrows move the playhead, Alt+arrows select clips, double-click or Enter edits a subtitle.</p>
+      </div>
+    </section>
+  </div>
+</main>
+<!-- inline:script vendor/vis-timeline.min.js -->
+<!-- inline:module app.mjs -->
+</body>
+</html>

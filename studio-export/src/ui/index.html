@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Line Studio</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5a6472; --line: #d5dae2; --accent: #1f5fd6; --accent-ink: #ffffff;
+  --ok: #17703a; --bad: #b3261e; --warn: #8a5a00; --focus: #f5a524; --field: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101317; --panel: #181c22; --ink: #eceff4; --muted: #a2acba; --line: #2c333d; --accent: #6c97ff; --accent-ink: #0b1220;
+    --ok: #55c07f; --bad: #ff8a80; --warn: #f2b84b; --field: #12161b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101317; --panel: #181c22; --ink: #eceff4; --muted: #a2acba; --line: #2c333d; --accent: #6c97ff; --accent-ink: #0b1220;
+  --ok: #55c07f; --bad: #ff8a80; --warn: #f2b84b; --field: #12161b;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light dark; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; overflow-wrap: anywhere; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header a { color: var(--accent); }
+header h1 { font-size: 1.15rem; margin: 0; flex: 1 1 auto; }
+#status { color: var(--muted); font-size: .9rem; }
+main { display: grid; gap: 16px; padding: 16px; max-width: 1200px; margin: 0 auto; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 960px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .wide { grid-column: 1 / -1; } }
+section, details.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+h2 { font-size: 1.05rem; margin: 0 0 10px; }
+label { display: block; font-size: .9rem; color: var(--muted); margin: 8px 0 4px; }
+input, select, textarea, button { font: inherit; color: var(--ink); }
+input[type="text"], input[type="url"], input[type="number"], select, textarea { width: 100%; min-width: 0; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+textarea { min-height: 76px; resize: vertical; }
+input[type="checkbox"] { width: 18px; height: 18px; vertical-align: middle; margin-right: 6px; }
+button { min-height: 40px; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.small { min-height: 34px; min-width: 34px; padding: 2px 8px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > * { flex: 0 1 auto; }
+.row > .grow { flex: 1 1 140px; min-width: 0; }
+ol.plain, ul.plain { list-style: none; padding: 0; margin: 0; }
+#log { max-height: 320px; overflow: auto; margin-bottom: 8px; }
+#log li { padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; white-space: pre-wrap; border: 1px solid var(--line); }
+#log li.user { border-color: var(--accent); }
+#log li.error { color: var(--bad); border-color: var(--bad); }
+#log li .who { display: block; font-size: .78rem; color: var(--muted); }
+.scene { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 0 0 10px; }
+.scene legend { font-weight: 600; padding: 0 6px; }
+.step { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr); border-top: 1px dashed var(--line); padding: 8px 0; }
+.step .args { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.step .args label { margin: 0 0 2px; font-size: .78rem; }
+.badge { display: inline-block; font-size: .78rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.badge.bad { color: var(--bad); border-color: var(--bad); }
+.badge.warn { color: var(--warn); border-color: var(--warn); }
+.errors { color: var(--bad); margin: 8px 0 0; padding-left: 18px; }
+.hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; }
+.job { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.job progress { width: 100%; height: 10px; }
+video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Line Studio</h1>
+  <a id="editorLink" href="/editor">Editor</a>
+  <span id="status" role="status">Connecting...</span>
+</header>
+<main>
+  <section id="chatPanel" aria-labelledby="chatH">
+    <h2 id="chatH">Chat</h2>
+    <label for="url">Site to record</label>
+    <input id="url" type="url" inputmode="url" autocomplete="off" placeholder="https://example.com">
+    <ol id="log" class="plain" role="log" aria-live="polite" aria-label="Conversation"></ol>
+    <form id="chatForm">
+      <label for="msg">What should the video show?</label>
+      <textarea id="msg" placeholder="A 30 second tour of the pricing page, then open the sign-up form."></textarea>
+      <div class="row"><button class="primary" id="send" type="submit">Plan the video</button><span class="hint">Ctrl+Enter sends. Nothing is recorded until you approve.</span></div>
+    </form>
+  </section>
+
+  <section id="planPanel" aria-labelledby="planH" hidden>
+    <h2 id="planH">Storyboard</h2>
+    <p class="hint" id="planNote"></p>
+    <label for="title">Title</label>
+    <input id="title" type="text" maxlength="120">
+    <ol id="scenes" class="plain"></ol>
+    <div class="row"><button type="button" id="addScene">Add scene</button></div>
+    <div class="row">
+      <label><input type="checkbox" id="wantVoice" checked>Add a voice-over when a voice is set up</label>
+    </div>
+    <ul id="planErrors" class="errors" role="alert"></ul>
+    <div class="row"><button class="primary" id="approve" type="button">Approve and record</button></div>
+  </section>
+
+  <details class="panel" id="settings">
+    <summary>Settings: models and voice</summary>
+    <form id="settingsForm">
+      <label for="cfgBase">Ollama address</label>
+      <input id="cfgBase" type="url" autocomplete="off">
+      <div class="row"><span id="modelState" class="badge">models: not loaded</span><button type="button" id="refreshModels" class="small">Refresh list</button></div>
+      <label for="cfgPlanner">Planner model (turns the chat into a storyboard)</label>
+      <select id="cfgPlanner"></select>
+      <label for="cfgNarration">Narration model (reserved: wording of the spoken lines)</label>
+      <select id="cfgNarration"></select>
+      <label for="cfgBackend">Voice backend</label>
+      <select id="cfgBackend"><option value="kokoro">Kokoro (default)</option><option value="chatterbox">Chatterbox (your own voice)</option><option value="cmd">Custom command</option></select>
+      <label for="cfgVoice">Kokoro voice</label>
+      <input id="cfgVoice" type="text" autocomplete="off" placeholder="af_heart">
+      <p class="hint" id="voiceState"></p>
+      <p class="hint">The command and the voice sample can only be set by editing studio.config.json.</p>
+      <label><input type="checkbox" id="cfgPrivate">Allow local and private network addresses (localhost, 192.168.x.x)</label>
+      <div class="row">
+        <div class="grow"><label for="cfgWidth">Width</label><input id="cfgWidth" type="number" min="320" max="3840" step="1"></div>
+        <div class="grow"><label for="cfgHeight">Height</label><input id="cfgHeight" type="number" min="240" max="2160" step="1"></div>
+        <div class="grow"><label for="cfgPace">Pace</label><input id="cfgPace" type="number" min="0.25" max="4" step="0.05"></div>
+      </div>
+      <label><input type="checkbox" id="cfgBurn">Draw captions into the video</label>
+      <ul id="cfgErrors" class="errors" role="alert"></ul>
+      <div class="row"><button class="primary" type="submit">Save settings</button><span id="cfgSaved" class="hint" role="status"></span></div>
+    </form>
+  </details>
+
+  <section id="jobsPanel" class="wide" aria-labelledby="jobsH">
+    <h2 id="jobsH">Videos</h2>
+    <ul id="jobList" class="plain"></ul>
+    <p class="hint" id="noJobs">No videos yet.</p>
+    <div id="player" hidden>
+      <h3 id="playerTitle"></h3>
+      <video id="video" controls preload="metadata"></video>
+      <p class="row" id="playerLinks"></p>
+    </div>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const h = (tag, props = {}, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'text') e.textContent = v; else if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v === true) e.setAttribute(k, ''); else if (v !== false && v != null) e.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid != null) e.append(kid);
+    return e;
+  };
+  const safe = (fn) => { try { return fn(); } catch { return null; } };
+
+  // ---- token: from ?token=, kept for this tab only, removed from the address bar
+  let token = '';
+  const fromUrl = new URLSearchParams(location.search).get('token');
+  if (fromUrl) { token = fromUrl; safe(() => sessionStorage.setItem('studio-token', token)); history.replaceState(null, '', location.pathname); }
+  else token = safe(() => sessionStorage.getItem('studio-token')) || '';
+  if (token) $('editorLink').href = '/editor?token=' + encodeURIComponent(token);
+
+  async function api(path, method = 'GET', body) {
+    const res = await fetch(path, { method, headers: { authorization: 'Bearer ' + token, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error?.message || res.statusText), { code: data.error?.code, errors: data.error?.errors, data });
+    return data;
+  }
+  const mediaUrl = (name) => '/media/' + encodeURIComponent(name) + '?token=' + encodeURIComponent(token);
+
+  // ---- chat
+  const history_ = [];
+  const log = $('log');
+  const say = (who, text, cls = '') => { log.append(h('li', { class: cls }, h('span', { class: 'who', text: who }), text)); log.scrollTop = log.scrollHeight; };
+  const normaliseUrl = (v) => { v = v.trim(); if (!v) return ''; if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v; return (/^(localhost|127\.|\[::1\])/i.test(v) ? 'http://' : 'https://') + v; };
+
+  let proposal = null; // { id, hash }
+  let draft = null; // the editable storyboard
+  let schema = null;
+
+  $('chatForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = normaliseUrl($('url').value);
+    const text = $('msg').value.trim();
+    if (!url) { say('Studio', 'Enter the address of the site first.', 'error'); $('url').focus(); return; }
+    if (!text) { $('msg').focus(); return; }
+    $('url').value = url;
+    history_.push({ role: 'user', content: text });
+    say('You', text, 'user');
+    $('msg').value = '';
+    $('send').disabled = true;
+    setStatus('Planning...');
+    try {
+      const r = await api('/api/chat', 'POST', { messages: history_, url });
+      history_.push({ role: 'assistant', content: r.reply });
+      say(r.proposal.fallback ? 'Studio (no model)' : 'Model', r.reply);
+      showProposal(r.proposal);
+    } catch (err) {
+      say('Studio', err.message + (err.errors ? '\n' + err.errors.slice(0, 5).map((x) => `${x.path}: ${x.message}`).join('\n') : ''), 'error');
+    } finally { $('send').disabled = false; setStatus('Ready'); }
+  });
+  $('msg').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('chatForm').requestSubmit(); } });
+
+  // ---- storyboard editor
+  function showProposal(p) {
+    proposal = { id: p.id, hash: p.hash };
+    draft = JSON.parse(JSON.stringify(p.storyboard));
+    $('planNote').textContent = p.fallback ? 'A basic plan made without a model. Edit it, or fix the model in Settings and ask again.' : 'Edit anything, then approve. The server checks it again before recording.';
+    $('planPanel').hidden = false;
+    renderPlan();
+    $('planPanel').scrollIntoView({ block: 'nearest' });
+  }
+  const actionNames = () => (schema ? schema.actions.map((a) => a.action) : []);
+  const spec = (name) => schema.actions.find((a) => a.action === name);
+  const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; renderPlan(); };
+
+  function argField(step, name, def) {
+    const id = 'f' + Math.random().toString(36).slice(2, 8);
+    let input;
+    if (def.type === 'key') input = h('select', { id }, h('option', { value: '', text: '(choose)' }), schema.keys.map((k) => h('option', { value: k, text: k })));
+    else if (def.type === 'to') input = h('select', { id }, ['', 'top', 'bottom'].map((k) => h('option', { value: k, text: k || '(none)' })));
+    else if (def.type === 'ms' || def.type === 'px') input = h('input', { id, type: 'number', step: '1' });
+    else input = h('input', { id, type: 'text', maxlength: String(def.type === 'selector' ? schema.limits.selector : def.max || schema.limits.caption) });
+    input.value = step[name] === undefined ? '' : String(step[name]);
+    input.addEventListener('input', () => {
+      const v = input.value;
+      if (v === '') delete step[name]; else step[name] = def.type === 'ms' || def.type === 'px' ? Number(v) : v;
+    });
+    return h('div', {}, h('label', { for: id, text: name + (def.required ? ' *' : '') }), input);
+  }
+
+  function renderPlan() {
+    $('title').value = draft.title || '';
+    const list = $('scenes');
+    list.replaceChildren();
+    draft.scenes.forEach((scene, si) => {
+      const cap = h('textarea', { id: 'cap' + si, maxlength: String(schema.limits.caption), 'aria-label': `Scene ${si + 1} caption` });
+      cap.value = scene.caption || '';
+      cap.addEventListener('input', () => { scene.caption = cap.value; });
+      scene.steps = scene.steps || [];
+      const steps = scene.steps.map((step, ti) => {
+        const sp = spec(step.action);
+        const sel = h('select', { 'aria-label': `Scene ${si + 1} step ${ti + 1} action` }, actionNames().map((n) => h('option', { value: n, text: n })));
+        sel.value = step.action;
+        sel.addEventListener('change', () => { const keep = {}; scene.steps[ti] = { action: sel.value, ...keep }; for (const [k, d] of Object.entries(spec(sel.value).args)) if (d.default !== undefined) scene.steps[ti][k] = d.default; renderPlan(); });
+        return h('li', { class: 'step' },
+          h('div', { class: 'row' }, sel,
+            h('button', { type: 'button', class: 'small', 'aria-label': 'Move step up', text: '↑', onclick: () => move(scene.steps, ti, -1) }),
+            h('button', { type: 'button', class: 'small', 'aria-label': 'Move step down', text: '↓', onclick: () => move(scene.steps, ti, 1) }),
+            h('button', { type: 'button', class: 'small', 'aria-label': 'Remove step', text: '✕', onclick: () => { scene.steps.splice(ti, 1); renderPlan(); } })),
+          h('div', { class: 'args' }, sp ? Object.entries(sp.args).map(([n, d]) => argField(step, n, d)) : []));
+      });
+      const addSel = h('select', { 'aria-label': `Add a step to scene ${si + 1}` }, actionNames().map((n) => h('option', { value: n, text: n })));
+      list.append(h('li', {}, h('fieldset', { class: 'scene' }, h('legend', { text: `Scene ${si + 1}` }),
+        h('label', { for: 'cap' + si, text: 'Caption (narration)' }), cap,
+        h('ol', { class: 'plain' }, steps),
+        h('div', { class: 'row' }, addSel,
+          h('button', { type: 'button', text: 'Add step', onclick: () => { const s = { action: addSel.value }; for (const [k, d] of Object.entries(spec(s.action).args)) if (d.default !== undefined) s[k] = d.default; scene.steps.push(s); renderPlan(); } }),
+          h('button', { type: 'button', class: 'small', 'aria-label': 'Move scene up', text: '↑', onclick: () => move(draft.scenes, si, -1) }),
+          h('button', { type: 'button', class: 'small', 'aria-label': 'Move scene down', text: '↓', onclick: () => move(draft.scenes, si, 1) }),
+          h('button', { type: 'button', text: 'Remove scene', onclick: () => { draft.scenes.splice(si, 1); renderPlan(); } })))));
+    });
+  }
+  $('title').addEventListener('input', () => { if (draft) draft.title = $('title').value; });
+  $('addScene').addEventListener('click', () => { if (draft) { draft.scenes.push({ caption: '', steps: [] }); renderPlan(); } });
+
+  $('approve').addEventListener('click', async () => {
+    if (!proposal || !draft) return;
+    const errs = $('planErrors');
+    errs.replaceChildren();
+    $('approve').disabled = true;
+    try {
+      const r = await api('/api/storyboard/approve', 'POST', { id: proposal.id, hash: proposal.hash, storyboard: draft, stages: { voice: $('wantVoice').checked } });
+      say('Studio', `Recording started${r.edited ? ' (with your edits)' : ''}.`);
+      await refreshJobs();
+      follow(r.jobId);
+    } catch (err) {
+      const list = err.errors && err.errors.length ? err.errors : [{ path: '', message: err.message }];
+      for (const x of list.slice(0, 12)) errs.append(h('li', { text: (x.path ? x.path + ': ' : '') + x.message }));
+    } finally { $('approve').disabled = false; }
+  });
+
+  // ---- jobs
+  const jobsState = new Map();
+  const live = new Map(); // id -> latest event text
+  function renderJobs() {
+    const list = $('jobList');
+    list.replaceChildren();
+    const jobs = [...jobsState.values()];
+    $('noJobs').hidden = jobs.length > 0;
+    for (const j of jobs) {
+      const cls = j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : 'warn';
+      const skipped = Object.entries(j.stages || {}).filter(([, s]) => s.status === 'skipped' || s.status === 'failed').map(([n, s]) => `${n}: ${s.reason || s.status}`);
+      list.append(h('li', { class: 'job' },
+        h('div', { class: 'row' }, h('strong', { class: 'grow', text: j.title }), h('span', { class: 'badge ' + cls, text: j.status })),
+        h('progress', { max: '1', value: String(j.progress || 0), 'aria-label': 'Progress of ' + j.title }),
+        h('div', { class: 'hint', text: live.get(j.id) || (j.stage ? 'stage: ' + j.stage : '') }),
+        j.error ? h('div', { class: 'errors', text: j.error.message }) : null,
+        skipped.length ? h('div', { class: 'hint', text: skipped.join(' | ') }) : null,
+        j.final ? h('div', { class: 'row' }, h('button', { type: 'button', text: 'Play', onclick: () => play(j) })) : null));
+    }
+  }
+  function play(j) {
+    $('player').hidden = false;
+    $('playerTitle').textContent = j.title;
+    $('video').src = mediaUrl(j.final);
+    const links = $('playerLinks');
+    links.replaceChildren();
+    for (const [k, name] of Object.entries(j.files || {})) if (name && k !== 'video') links.append(h('a', { href: mediaUrl(name), download: name, text: name }));
+    if (j.files?.video) links.append(h('a', { href: mediaUrl(j.files.video), download: j.files.video, text: j.files.video }));
+    $('player').scrollIntoView({ block: 'nearest' });
+  }
+  async function refreshJobs() {
+    try { const r = await api('/api/jobs'); jobsState.clear(); for (const j of r.jobs) jobsState.set(j.id, j); renderJobs(); return r.jobs; } catch { return []; }
+  }
+  async function follow(id) {
+    try {
+      const res = await fetch('/api/jobs/' + encodeURIComponent(id) + '/events', { headers: { authorization: 'Bearer ' + token } });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i); buf = buf.slice(i + 2);
+          const ev = /^event: (.*)$/m.exec(block)?.[1];
+          const data = safe(() => JSON.parse(/^data: (.*)$/m.exec(block)?.[1]));
+          if (!data) continue;
+          if (ev === 'progress') { live.set(id, [data.stage, data.type, data.text || data.caption || data.action || data.reason || ''].filter(Boolean).join(': ')); renderJobs(); }
+          if (ev === 'end') { live.delete(id); await refreshJobs(); const j = jobsState.get(id); if (j?.final) play(j); }
+        }
+      }
+    } catch { /* the list polls as a fallback */ }
+    refreshJobs();
+  }
+  setInterval(async () => { if ([...jobsState.values()].some((j) => j.status === 'running' || j.status === 'queued')) await refreshJobs(); }, 4000);
+
+  // ---- settings
+  let currentConfig = null;
+  const fillSelect = (sel, models, current) => {
+    sel.replaceChildren(h('option', { value: '', text: '(none)' }));
+    const names = models.map((m) => m.name);
+    if (current && !names.includes(current)) sel.append(h('option', { value: current, text: current + ' (not installed)' }));
+    for (const n of names) sel.append(h('option', { value: n, text: n }));
+    sel.value = current || '';
+  };
+  async function loadModels() {
+    try {
+      const r = await api('/api/models');
+      const badge = $('modelState');
+      badge.textContent = r.reachable ? `${r.models.length} model${r.models.length === 1 ? '' : 's'} at ${r.provider}` : `${r.provider} not reachable`;
+      badge.className = 'badge ' + (r.reachable ? 'ok' : 'bad');
+      fillSelect($('cfgPlanner'), r.models, currentConfig?.models.planner);
+      fillSelect($('cfgNarration'), r.models, currentConfig?.models.narration);
+    } catch (err) { $('modelState').textContent = err.message; }
+  }
+  async function loadConfig() {
+    const r = await api('/api/config');
+    currentConfig = r.config;
+    const c = r.config;
+    $('cfgBase').value = c.providers[c.provider]?.baseUrl || '';
+    $('cfgBackend').value = c.tts.backend;
+    $('cfgVoice').value = c.tts.voice;
+    $('cfgPrivate').checked = c.allowPrivateNetwork;
+    $('cfgWidth').value = c.recording.width; $('cfgHeight').value = c.recording.height; $('cfgPace').value = c.recording.pace; $('cfgBurn').checked = c.recording.burnCaptions;
+    $('voiceState').textContent = r.voice.available ? 'Voice-over is ready.' : 'No voice-over yet: ' + r.voice.reason;
+    return r;
+  }
+  $('refreshModels').addEventListener('click', () => loadModels());
+  $('settingsForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('cfgErrors').replaceChildren(); $('cfgSaved').textContent = '';
+    const c = currentConfig;
+    const body = {
+      providers: { [c.provider]: { ...c.providers[c.provider], baseUrl: $('cfgBase').value.trim() } },
+      models: { planner: $('cfgPlanner').value, narration: $('cfgNarration').value },
+      tts: { backend: $('cfgBackend').value, voice: $('cfgVoice').value.trim() },
+      allowPrivateNetwork: $('cfgPrivate').checked,
+      recording: { width: Number($('cfgWidth').value), height: Number($('cfgHeight').value), pace: Number($('cfgPace').value), burnCaptions: $('cfgBurn').checked },
+    };
+    try { await api('/api/config', 'PUT', body); await loadConfig(); await loadModels(); $('cfgSaved').textContent = 'Saved.'; } catch (err) {
+      for (const x of (err.errors && err.errors.length ? err.errors : [{ path: '', message: err.message }])) $('cfgErrors').append(h('li', { text: (x.path ? x.path + ': ' : '') + x.message }));
+    }
+  });
+
+  function setStatus(t) { $('status').textContent = t; }
+
+  (async () => {
+    if (!token) { setStatus('Open the address that Studio printed when it started (it contains ?token=...).'); return; }
+    try {
+      schema = await api('/api/schema');
+      await loadConfig();
+      await loadModels();
+      const jobs = await refreshJobs();
+      for (const j of jobs) if (j.status === 'running' || j.status === 'queued') follow(j.id);
+      setStatus('Ready');
+      say('Studio', 'Enter the site, say what the video should show, and I will propose a storyboard. Nothing is recorded until you approve it.');
+    } catch (err) { setStatus(err.code === 'UNAUTHORIZED' ? 'The access token is not valid. Open the address Studio printed.' : err.message); }
+  })();
+})();
+</script>
+</body>
+</html>

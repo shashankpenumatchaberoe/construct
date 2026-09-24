@@ -1,0 +1,12 @@
+Copyright (c) 2026 thenewurbankid-web. All rights reserved.
+
+This package (@line/studio -- Studio, the chat-driven narrated-video tool and
+the media tooling vendored under `vendor/media/`) is proprietary software. It
+is distributed privately via GitHub Packages (restricted registry) for use
+under a separate agreement with thenewurbankid-web; no license to use, copy,
+modify, merge, publish, distribute, sublicense, or sell copies of this
+package is granted except as expressly agreed in writing.
+
+Third-party software Studio calls at run time (ffmpeg, Playwright and its
+browsers, Ollama, Kokoro, Chatterbox) is installed separately and keeps its
+own license.

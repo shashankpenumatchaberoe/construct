@@ -1,0 +1,38 @@
+{
+  "name": "@line/studio",
+  "version": "0.9.0",
+  "description": "Studio: a narrated video of a website from a chat, with local, configurable models. Packs the recording, caption, voice-over and mixing tools it needs; nothing leaves your machine.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "studio": "./bin/studio.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "pack": "node scripts/pack.mjs",
+    "prepack": "node scripts/pack.mjs --vendor-only",
+    "doctor": "node bin/studio.mjs doctor"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0",
+    "subtitle": "^4.2.2"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thenewurbankid-web/construct.git",
+    "directory": "packages/studio"
+  }
+}

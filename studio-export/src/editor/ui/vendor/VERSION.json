@@ -1,0 +1,11 @@
+{
+  "name": "vis-timeline",
+  "version": "8.5.4",
+  "license": "(Apache-2.0 OR MIT)",
+  "homepage": "https://github.com/visjs/vis-timeline",
+  "files": {
+    "vis-timeline.min.js": "22045807e537d38d01a537e97563ad8b0269f8b827bb5da23e060f9c3f8ec13b",
+    "LICENSE-vis-timeline-MIT.txt": "507e7e91e0a385c9de0464889068fada0620e327d23f1d64605a7d046490ec97",
+    "LICENSE-vis-timeline-Apache-2.0.txt": "1509904280a272780fd69c04b858f512cf216f8e3464a0dd98d8f34416feced9"
+  }
+}
