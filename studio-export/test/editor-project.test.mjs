@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import {
   ERR, EditorError, blankProject, isBareName, listMedia, openWorkspace, overlaps, probeDurationMs, projectDuration, projectFromJob, resolveMedia, subtitleClipsFromCaptions, validateProject,
 } from '../src/editor/project.mjs';
@@ -56,7 +56,6 @@ const CASES = [
   [ERR.BAD_GAIN, (p) => { p.layers[1].clips[0].gain = 5; }],
   [ERR.BAD_GAIN, (p) => { p.layers[0].clips[0].gain = 1; }],
   [ERR.OVERLAP, (p) => { p.layers[3].clips[1].start = 3000; }],
-  [ERR.OVERLAP, (p) => { p.layers[0].clips.push({ id: 'c9', start: 9000, duration: 5000, in: 0, src: 'demo.webm' }); }],
   [ERR.UNKNOWN_FIELD, (p) => { p.evil = 1; }],
   [ERR.UNKNOWN_FIELD, (p) => { p.layers[0].clips[0].path = '/tmp/x'; }],
   [ERR.UNKNOWN_FIELD, (p) => { p.layers[0].dir = 'x'; }],
@@ -155,4 +154,110 @@ test('probeDurationMs falls back from ffprobe to the ffmpeg banner to a stream-c
   assert.equal(await probeDurationMs('f.webm', { execFile: exec }), 7250);
   assert.deepEqual(seq, ['ffprobe', 'ffmpeg', 'ffmpeg:copy']);
   assert.equal(await probeDurationMs('f.webm', { execFile: (c, a, o, cb) => cb(null, '', 'Duration: 00:01:02.50, start') }), 62500);
+});
+
+test('video clips may overlap in one layer (the earlier one is on top); subtitle clips may not', () => {
+  const p = sampleProject();
+  p.layers[0].clips.push({ id: 'c9', start: 9000, duration: 5000, in: 0, src: 'demo.webm' });
+  assert.equal(validateProject(p).ok, true, 'a video layer stacks its clips');
+  assert.deepEqual(overlaps(p.layers[0]), []);
+  p.layers[3].clips[1].start = 3000;
+  const v = validateProject(p);
+  assert.equal(v.ok, false);
+  assert.equal(v.errors[0].code, ERR.OVERLAP, 'a subtitle layer still shows one line at a time');
+});
+
+test('validateProject checks speed, opacity and zoom on the right kinds of clip', () => {
+  const ok = mutate((p) => { p.layers[0].clips[0].speed = 4; p.layers[0].clips[0].opacity = 0.5; p.layers[0].clips[0].zoom = { scale: 2, x: 0.5, y: 0.5, at: 0, ramp: 600, hold: null }; p.layers[1].clips[0].speed = 0.5; });
+  assert.deepEqual(validateProject(ok), { ok: true });
+  const rows = [
+    [ERR.BAD_SPEED, (p) => { p.layers[0].clips[0].speed = 17; }],
+    [ERR.BAD_SPEED, (p) => { p.layers[1].clips[0].speed = '2'; }],
+    [ERR.BAD_SPEED, (p) => { p.layers[3].clips[0].speed = 2; }],
+    [ERR.BAD_OPACITY, (p) => { p.layers[0].clips[0].opacity = 2; }],
+    [ERR.BAD_OPACITY, (p) => { p.layers[1].clips[0].opacity = 0.5; }],
+    [ERR.BAD_ZOOM, (p) => { p.layers[0].clips[0].zoom = { scale: 2 }; }],
+    [ERR.BAD_ZOOM, (p) => { p.layers[1].clips[0].zoom = { scale: 2, x: 0.5, y: 0.5, at: 0, ramp: 600, hold: null }; }],
+    [ERR.BAD_ZOOM, (p) => { p.layers[0].clips[0].zoom = null; }],
+  ];
+  for (const [code, fn] of rows) {
+    const v = validateProject(mutate(fn));
+    assert.equal(v.ok, false, code);
+    assert.equal(v.errors[0].code, code);
+  }
+  assert.deepEqual(validateProject(sampleProject()), { ok: true }, 'old projects without the new fields still load');
+});
+
+const autoLayer = (id, clipId, param, points, extra = {}) => ({ id, kind: 'automation', name: `line ${id}`, muted: false, locked: false, clips: [], link: { clipId, param }, points, ...extra });
+const pts = (...v) => v.map((x, i) => ({ t: i * 1000, v: x, curve: 'linear' }));
+
+test('validateProject checks automation layers: a line linked to one param of one clip, and layer volume and pan', () => {
+  const ok = mutate((p) => {
+    p.layers.splice(2, 0, autoLayer('l1', 'c2', 'gain', pts(1, 0.2)), autoLayer('l2', 'c2', 'pan', pts(-1, 1)), autoLayer('l3', 'c2', 'mute', pts(0, 1)));
+    p.layers.splice(1, 0, autoLayer('l4', 'c1', 'opacity', pts(0, 1)));
+    p.layers.find((l) => l.id === 'music').gain = 0.5;
+    p.layers.find((l) => l.id === 'music').pan = -0.25;
+    p.layers.find((l) => l.id === 'voice').clips[0].pan = 0.3;
+  });
+  assert.deepEqual(validateProject(ok), { ok: true });
+  const rows = [
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'zz', 'gain', pts(1))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'volume', pts(1))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c1', 'gain', pts(1))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'opacity', pts(1))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'gain', [])); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'gain', [{ t: 5, v: 1, curve: 'linear' }, { t: 5, v: 1, curve: 'linear' }])); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'gain', pts(9))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push(autoLayer('l1', 'c2', 'gain', pts(1)), autoLayer('l2', 'c2', 'gain', pts(0.5))); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push({ ...autoLayer('l1', 'c2', 'gain', pts(1)), link: 'c2' }); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers.push({ ...autoLayer('l1', 'c2', 'gain', pts(1)), link: { clipId: 'c2', param: 'gain', extra: 1 } }); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers[1].points = pts(1); }],
+    [ERR.BAD_AUTOMATION, (p) => { p.layers[1].link = { clipId: 'c1', param: 'gain' }; }],
+    [ERR.BAD_CLIPS, (p) => { p.layers.push(autoLayer('l1', 'c2', 'gain', pts(1), { clips: [{ id: 'c9', start: 0, duration: 100, in: 0, src: 'a.wav' }] })); }],
+    [ERR.BAD_GAIN, (p) => { p.layers[1].gain = 5; }],
+    [ERR.BAD_GAIN, (p) => { p.layers[0].gain = 1; }],
+    [ERR.BAD_GAIN, (p) => { p.layers[3].gain = 1; }],
+    [ERR.BAD_PAN, (p) => { p.layers[1].pan = 1.5; }],
+    [ERR.BAD_PAN, (p) => { p.layers[0].pan = 0; }],
+    [ERR.BAD_PAN, (p) => { p.layers[1].clips[0].pan = -2; }],
+    [ERR.BAD_PAN, (p) => { p.layers[0].clips[0].pan = 0; }],
+    [ERR.BAD_PAN, (p) => { p.layers[3].clips[0].pan = 0; }],
+  ];
+  for (const [code, fn] of rows) {
+    const v = validateProject(mutate(fn));
+    assert.equal(v.ok, false, `${code}: ${fn}`);
+    assert.equal(v.errors[0].code, code, `${fn}`);
+  }
+  assert.deepEqual(validateProject(sampleProject()), { ok: true }, 'a project written before automation existed still loads');
+});
+
+test('validateProject checks the master volume', () => {
+  assert.deepEqual(validateProject(mutate((p) => { p.master = 0.5; })), { ok: true });
+  assert.deepEqual(validateProject(mutate((p) => { p.master = 4; })), { ok: true });
+  for (const bad of [-1, 5, NaN, '1', null]) {
+    const v = validateProject(mutate((p) => { p.master = bad; }));
+    assert.equal(v.ok, false, String(bad));
+    assert.equal(v.errors[0].code, ERR.BAD_GAIN);
+  }
+});
+
+test('validateProject checks notes: a list of { id, at, text, done? } with unique ids, and nothing else', () => {
+  const note = { id: 'n1', at: 1000, text: 'fix this' };
+  const withNotes = (notes) => mutate((p) => { p.notes = notes; });
+  assert.equal(validateProject(withNotes([note, { ...note, id: 'n2', done: true }])).ok, true);
+  assert.equal(validateProject(withNotes([])).ok, true, 'an empty list is fine');
+  const bad = [
+    [ERR.BAD_NOTE, 'a string', 'x'], [ERR.BAD_NOTE, 'not objects', ['x']],
+    [ERR.BAD_NOTE, 'no text', [{ ...note, text: '' }]], [ERR.BAD_NOTE, 'blank text', [{ ...note, text: '   ' }]], [ERR.BAD_NOTE, 'long text', [{ ...note, text: 'x'.repeat(501) }]],
+    [ERR.BAD_NOTE, 'done is not a flag', [{ ...note, done: 'yes' }]],
+    [ERR.BAD_TIME, 'negative time', [{ ...note, at: -1 }]], [ERR.BAD_TIME, 'fractional time', [{ ...note, at: 1.5 }]],
+    [ERR.BAD_ID, 'no id', [{ at: 1, text: 'x' }]], [ERR.DUP_ID, 'twice', [note, note]], [ERR.DUP_ID, 'a clip id', [{ ...note, id: 'c1' }]],
+    [ERR.UNKNOWN_FIELD, 'extra field', [{ ...note, clipId: 'c1' }]],
+    [ERR.BAD_NOTE, 'too many', Array.from({ length: 201 }, (_, i) => ({ id: `n${i}`, at: i, text: 'x' }))],
+  ];
+  for (const [want, label, notes] of bad) {
+    const v = validateProject(withNotes(notes));
+    assert.equal(v.ok, false, label);
+    assert.ok(v.errors.some((e) => e.code === want), `${label}: ${want} in ${JSON.stringify(v.errors.map((e) => e.code))}`);
+  }
 });

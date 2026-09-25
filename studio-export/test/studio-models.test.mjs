@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
-import { CONFIG_ERR, ConfigError, DEFAULT_CONFIG, ModelError, MODEL_ERR, applyUpdate, createOllamaProvider, createProvider, loadConfig, providerNames, registerProvider, saveConfig, validateConfig } from '../src/models.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
+import { VOICE_PRESET, CONFIG_ERR, ConfigError, DEFAULT_CONFIG, ModelError, MODEL_ERR, applyUpdate, createOllamaProvider, createProvider, loadConfig, providerNames, registerProvider, saveConfig, validateConfig } from '../src/models.mjs';
 import { closeServer, listenInRange, mockOllama } from './studio-helpers.mjs';
 import http from 'node:http';
 
@@ -148,4 +148,22 @@ test('another local provider registers by name and is chosen by config.provider'
   assert.equal(p.name, 'fake-local');
   assert.deepEqual(await p.listModels(), [{ name: 'http://127.0.0.1:9999', size: 0 }]);
   assert.throws(() => registerProvider('Bad Name', () => ({})), TypeError);
+});
+
+test('the cloned-voice settings default to the demo video preset and are validated as numbers', () => {
+  const ok = validateConfig({});
+  assert.deepEqual(ok.config.tts.settings, VOICE_PRESET);
+  assert.deepEqual(VOICE_PRESET, { exaggeration: 0.7, cfgWeight: 0.3, temperature: 0.8, pauseMs: 650, seed: 1, ref: 'best', tempo: 0.9 });
+  const bad = validateConfig({ tts: { settings: { exaggeration: 5, tempo: 'slow', pauseMs: 1.5, ref: 'x', foo: 1 } } });
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.errors.map((e) => e.path).sort(), ['tts.settings.exaggeration', 'tts.settings.foo', 'tts.settings.pauseMs', 'tts.settings.ref', 'tts.settings.tempo']);
+});
+
+test('an API update may change the voice settings but still cannot change the sample path', () => {
+  const current = validateConfig({ tts: { backend: 'chatterbox', voiceSample: '/home/me/voice/sample.wav' } }).config;
+  const next = applyUpdate(current, { tts: { settings: { tempo: 1 } } });
+  assert.equal(next.tts.settings.tempo, 1);
+  assert.equal(next.tts.settings.exaggeration, 0.7, 'the other settings are kept');
+  assert.equal(next.tts.voiceSample, '/home/me/voice/sample.wav');
+  assert.throws(() => applyUpdate(current, { tts: { voiceSample: '/etc/passwd' } }), (e) => e.code === 'CONFIG_FILE_ONLY' || /voiceSample/.test(e.message));
 });

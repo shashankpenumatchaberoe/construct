@@ -274,7 +274,7 @@ export function createEditorHandler({ execFile = nodeExecFile, autosaveDelayMs =
           const r = applyOp(s.history.present, body.op, body.args ?? {});
           if (!r.ok) return send(res, 422, { ok: false, code: r.code, message: r.message });
           s.history.push(r.project);
-          extra = { ...(r.newClipId ? { newClipId: r.newClipId } : {}) };
+          extra = { ...(r.newClipId ? { newClipId: r.newClipId } : {}), ...(r.newLayerId ? { newLayerId: r.newLayerId } : {}), ...(r.newClipIds ? { newClipIds: r.newClipIds } : {}), ...(r.newNoteId ? { newNoteId: r.newNoteId } : {}), ...(r.pointIndex !== undefined ? { pointIndex: r.pointIndex } : {}) };
         }
         scheduleAutosave(s);
         return send(res, 200, view(s, extra));

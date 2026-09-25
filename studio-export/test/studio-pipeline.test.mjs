@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { ContainmentError, assertInside, runPipeline, voiceAvailability } from '../src/pipeline.mjs';
 import { validateConfig } from '../src/models.mjs';
 import { findFfmpeg, mediaDir } from '../src/resolve.mjs';
@@ -174,4 +174,26 @@ test('the real media tool builds subtitles inside the workspace (STUDIO_ROOT / S
   assert.match(fs.readFileSync(path.join(fs.realpathSync(ws), 'videos', 'tour.en.vtt'), 'utf8'), /^WEBVTT/);
   const after = new Set(list());
   assert.deepEqual([...after].filter((x) => !before.has(x)), [], 'nothing was written into the repository');
+});
+
+test('the Chatterbox voice runs with the demo video settings written as <slug>.voice.json; a file already there is never overwritten', async () => {
+  const ws = workspace();
+  const tool = fakeTool();
+  const config = cfg({ tts: { backend: 'chatterbox', voiceSample: '/home/me/voice/sample.wav', settings: { tempo: 1 } } });
+  const r = await runPipeline({ storyboard: sb(), workspace: ws, config, playwright: fakePlaywright().playwright, slug: 'tour', deps: { runTool: tool.run, mediaDir: '/fake/media', voiceAvailability: AVAILABLE } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(tool.runs.at(-1).args, ['tour', 'voice', '--voice-sample', '/home/me/voice/sample.wav']);
+  const file = path.join(ws, 'videos', 'tour.voice.json');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { exaggeration: 0.7, cfg_weight: 0.3, temperature: 0.8, pause_ms: 650, seed: 1, ref: 'best', tempo: 1 });
+  fs.writeFileSync(file, JSON.stringify({ exaggeration: 0.4 }));
+  const again = fakeTool();
+  await runPipeline({ storyboard: sb(), workspace: ws, config, playwright: fakePlaywright().playwright, slug: 'tour', stages: { record: false }, deps: { runTool: again.run, mediaDir: '/fake/media', voiceAvailability: AVAILABLE } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { exaggeration: 0.4 }, 'a hand-tuned voice.json wins');
+});
+
+test('Kokoro and command voices write no voice.json', async () => {
+  const ws = workspace();
+  const tool = fakeTool();
+  await runPipeline({ storyboard: sb(), workspace: ws, config: cfg(), playwright: fakePlaywright().playwright, slug: 'tour', deps: { runTool: tool.run, mediaDir: '/fake/media', voiceAvailability: AVAILABLE } });
+  assert.equal(fs.existsSync(path.join(ws, 'videos', 'tour.voice.json')), false);
 });

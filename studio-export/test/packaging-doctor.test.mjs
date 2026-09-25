@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { DEFAULT_OLLAMA_URL, findOllamaUrl, onPath, pingOllama, resolveOllamaUrl, runDoctor } from '../bin/doctor.mjs';
 import { main, parseArgs } from '../bin/cli.mjs';
 

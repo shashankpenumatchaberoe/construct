@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { ERR, validateProject } from '../src/editor/project.mjs';
 import { sampleProject, writeSampleWorkspace } from '../src/editor/sample.mjs';
 import { BUNDLE_FORMAT, checkSlug, openStore, slugify } from '../src/editor/store.mjs';

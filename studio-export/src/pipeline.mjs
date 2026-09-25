@@ -145,6 +145,12 @@ export async function runPipeline({ storyboard, workspace, config, playwright, o
     else {
       emit('voice', 'start', { backend: config.tts.backend });
       const t = config.tts;
+      // The demo video's cloned-voice settings, as the media tools read them (<slug>.voice.json); a file the user already
+      // put next to the video wins, so a hand-tuned voice is never overwritten.
+      if (t.backend === 'chatterbox' && t.settings && !exists(`${slug}.voice.json`)) {
+        const v = t.settings;
+        fs.writeFileSync(inOut(`${slug}.voice.json`), JSON.stringify({ exaggeration: v.exaggeration, cfg_weight: v.cfgWeight, temperature: v.temperature, pause_ms: v.pauseMs, seed: v.seed, ref: v.ref, tempo: v.tempo }, null, 2) + '\n');
+      }
       const extra = t.backend === 'cmd' ? ['--tts-cmd', t.ttsCmd] : t.backend === 'chatterbox' ? ['--voice-sample', t.voiceSample] : ['--voice', t.voice];
       try {
         await tool('voice', extra);

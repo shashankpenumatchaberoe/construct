@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { saveConfig } from '../src/models.mjs';
 import { startStudio } from '../src/server.mjs';
 import { fakePlaywright, goodStoryboard, mockOllama, staticSite } from './studio-helpers.mjs';
@@ -68,7 +68,8 @@ test('the chat page is served without a token, self-contained, with a strict CSP
     assert.match(html, /name="viewport"/);
     assert.match(html, /prefers-color-scheme: dark/);
     assert.match(html, /:focus-visible/);
-    assert.doesNotMatch(html, /<script[^>]+src=|<link[^>]+href=|@import|url\(\s*['"]?https?:/i, 'no CDN, no external script, style or font');
+    assert.doesNotMatch(html, /<script[^>]+src=|<link[^>]+href=(?!["']data:image\/)|@import|url\(\s*['"]?https?:/i, 'no CDN, no external script, style or font (an inline data: image, the favicon, loads nothing)');
+    assert.match(html, /<link rel="icon" href="data:image\/svg\+xml,/, 'the page has its favicon, inline');
     assert.doesNotMatch(html, /innerHTML|eval\(|document\.write/);
     assert.equal((await fetch(t.studio.url + '/index.html')).status, 200);
     assert.equal(t.studio.token.length >= 24, true);

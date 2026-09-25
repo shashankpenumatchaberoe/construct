@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { bundleModules } from '../src/editor/page.mjs';
 import { ERR } from '../src/editor/project.mjs';
 import defaultHandler, { createEditorHandler, revFromHeader } from '../src/editor/routes.mjs';
@@ -412,4 +412,18 @@ test('the vendored browser file is carried by the page, matches its recorded has
   const notice = fs.readFileSync(new URL('../NOTICE-editor.md', import.meta.url), 'utf8');
   for (const name of ['vis-timeline', 'vis-data', 'vis-util', 'moment', '@egjs/hammerjs', 'propagating-hammerjs', 'component-emitter', 'keycharm', 'uuid', 'xss', 'subtitle']) assert.ok(notice.includes(`| ${name}`), `${name} is in NOTICE-editor.md`);
   for (const f of ['LICENSE-vis-timeline-MIT.txt', 'LICENSE-vis-timeline-Apache-2.0.txt']) assert.ok(fs.existsSync(path.join(VENDOR_DIR, f)));
+});
+
+test('the page\'s modules join into one valid script: no top-level name is declared twice (they share one scope) and only supported import and export forms are used', async () => {
+  const vm = await import('node:vm');
+  const { bundleModules, UI_DIR } = await import('../src/editor/page.mjs');
+  const bundle = bundleModules(UI_DIR, 'app.mjs');
+  assert.doesNotThrow(() => new vm.Script(bundle), 'the bundled modules parse as a script');
+  const seen = new Map();
+  for (const name of fs.readdirSync(UI_DIR).filter((f) => f.endsWith('.mjs'))) {
+    for (const line of fs.readFileSync(path.join(UI_DIR, name), 'utf8').split('\n')) {
+      const m = /^(?:export\s+)?(?:async\s+)?(?:const|let|function|class)\s+([A-Za-z_$][\w$]*)/.exec(line);
+      if (m) { assert.ok(!seen.has(m[1]) || seen.get(m[1]) === name, `"${m[1]}" is declared in both ${seen.get(m[1])} and ${name}`); seen.set(m[1], name); }
+    }
+  }
 });

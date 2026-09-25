@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
+import { makeTempDir } from './support/tmpdir.mjs';
 import { RECORDER_ERR, RecorderError, createTimeline, recordStoryboard } from '../src/recorder.mjs';
 import { loadPlaywright, mediaDir } from '../src/resolve.mjs';
 import { validateStoryboard } from '../src/storyboard.mjs';

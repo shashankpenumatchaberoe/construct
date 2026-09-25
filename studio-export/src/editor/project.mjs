@@ -1,23 +1,31 @@
 // The Studio editor's timeline model: one JSON project per video, `<slug>.studio.json` in the workspace.
 //
-//   { version: 1, fps, width?, height?, name?, rev?, layers: [
+//   { version: 1, fps, width?, height?, name?, rev?, master?, layers: [
 //       { id, kind: 'video'|'voice'|'music'|'subtitle', name, muted, locked,
-//         clips: [{ id, start, duration, in, src?, text?, gain? }] } ] }
+//         clips: [{ id, start, duration, in, src?, text?, gain?, pan?, speed?, opacity?, zoom? }],
+//         gain?, pan?, link?, points? } ],
+//       notes?: [{ id, at, text, done? }] }
+//
+// A note is a line of text pinned to a moment of the timeline (`at`, ms): a reminder for the editor, or, later, a request for the assistant. Notes
+// are not rendered and never change a clip; `done` marks one dealt with.
 //
 // Times are integer milliseconds on the timeline (`start`, `duration`) and in the source file (`in`, the offset the clip
 // begins playing from). Media clips (video, voice, music) name a file by a bare workspace file name in `src`; subtitle clips
 // carry `text` and no `src`. A project never holds a path: names are [A-Za-z0-9._-] only, and files are looked up inside the
 // workspace by `resolveMedia` (realpath containment), never by a client-supplied directory.
 //
-// Overlap rule (one place, used by validation and by every op): a video layer and a subtitle layer show one clip at a time, so
-// their clips may not overlap; voice and music layers are mixed, so their clips may overlap.
+// Overlap rule (one place, used by validation and by every op): a subtitle layer shows one line at a time, so its clips may not
+// overlap. Voice and music clips are mixed, so they may overlap. Video clips may overlap too: the one that starts first is on top and
+// the later one is underneath, hidden where they overlap (a clip that starts at the same time as another sits under the one with the
+// lower id, which is the first made).
 import fs from 'node:fs';
 import path from 'node:path';
+import { lineProblem, opacityProblem, speedProblem, zoomProblem } from './ui/effects.mjs';
 
 export const PROJECT_VERSION = 1;
-export const KINDS = Object.freeze(['video', 'voice', 'music', 'subtitle']);
-/** Kinds whose clips may overlap inside one layer (they are mixed). Video and subtitle layers are single-track. */
-export const OVERLAP_KINDS = Object.freeze(new Set(['voice', 'music']));
+export const KINDS = Object.freeze(['video', 'voice', 'music', 'subtitle', 'automation']);
+/** Kinds whose clips may overlap inside one layer: voice and music are mixed, video stacks (earlier start on top). Only subtitle layers are single-track. */
+export const OVERLAP_KINDS = Object.freeze(new Set(['video', 'voice', 'music']));
 export const MEDIA_KINDS = Object.freeze(new Set(['video', 'voice', 'music']));
 export const MAX_TEXT = 500;
 export const MAX_MS = 24 * 60 * 60 * 1000;
@@ -35,11 +43,11 @@ export const ERR = Object.freeze({
   // project validation
   BAD_PROJECT: 'BAD_PROJECT', BAD_VERSION: 'BAD_VERSION', BAD_FPS: 'BAD_FPS', BAD_SIZE: 'BAD_SIZE', BAD_NAME: 'BAD_NAME', BAD_REV: 'BAD_REV',
   BAD_LAYERS: 'BAD_LAYERS', BAD_KIND: 'BAD_KIND', BAD_FLAG: 'BAD_FLAG', BAD_CLIPS: 'BAD_CLIPS', BAD_ID: 'BAD_ID', DUP_ID: 'DUP_ID',
-  BAD_TIME: 'BAD_TIME', BAD_SRC: 'BAD_SRC', BAD_TEXT: 'BAD_TEXT', BAD_GAIN: 'BAD_GAIN', OVERLAP: 'OVERLAP', UNKNOWN_FIELD: 'UNKNOWN_FIELD',
+  BAD_TIME: 'BAD_TIME', BAD_SRC: 'BAD_SRC', BAD_TEXT: 'BAD_TEXT', BAD_GAIN: 'BAD_GAIN', BAD_PAN: 'BAD_PAN', BAD_SPEED: 'BAD_SPEED', BAD_OPACITY: 'BAD_OPACITY', BAD_ZOOM: 'BAD_ZOOM', BAD_NOTE: 'BAD_NOTE', BAD_AUTOMATION: 'BAD_AUTOMATION', OVERLAP: 'OVERLAP', UNKNOWN_FIELD: 'UNKNOWN_FIELD',
   // ops
-  NO_CLIP: 'NO_CLIP', NO_LAYER: 'NO_LAYER', LOCKED: 'LOCKED', KIND_MISMATCH: 'KIND_MISMATCH', NOT_SUBTITLE: 'NOT_SUBTITLE',
+  NO_CLIP: 'NO_CLIP', NO_NOTE: 'NO_NOTE', NO_LAYER: 'NO_LAYER', LOCKED: 'LOCKED', KIND_MISMATCH: 'KIND_MISMATCH', NOT_SUBTITLE: 'NOT_SUBTITLE',
   OUT_OF_CLIP: 'OUT_OF_CLIP', TOO_SHORT: 'TOO_SHORT', BEFORE_SOURCE: 'BEFORE_SOURCE', BAD_ARG: 'BAD_ARG', UNKNOWN_OP: 'UNKNOWN_OP',
-  NOTHING_TO_UNDO: 'NOTHING_TO_UNDO', NOTHING_TO_REDO: 'NOTHING_TO_REDO', NO_AUTOSAVE: 'NO_AUTOSAVE', UNSAVED: 'UNSAVED',
+  NO_LANE: 'NO_LANE', NO_POINT: 'NO_POINT', POINT_CROSSING: 'POINT_CROSSING', NOTHING_TO_UNDO: 'NOTHING_TO_UNDO', NOTHING_TO_REDO: 'NOTHING_TO_REDO', NO_AUTOSAVE: 'NO_AUTOSAVE', UNSAVED: 'UNSAVED',
   // store and routes
   BAD_SLUG: 'BAD_SLUG', BAD_FILE: 'BAD_FILE', NOT_FOUND: 'NOT_FOUND', EXISTS: 'EXISTS', STALE_REV: 'STALE_REV', REV_REQUIRED: 'REV_REQUIRED',
   NO_SESSION: 'NO_SESSION', CORRUPT: 'CORRUPT', NO_VIDEO: 'NO_VIDEO', NO_DURATION: 'NO_DURATION', CONFIRM_REQUIRED: 'CONFIRM_REQUIRED',
@@ -96,9 +104,11 @@ export function overlaps(layer) {
 /** Total length of the project in ms: the end of the last clip on any layer. */
 export const projectDuration = (project) => project.layers.reduce((m, l) => l.clips.reduce((n, c) => Math.max(n, end(c)), m), 0);
 
-const LAYER_KEYS = new Set(['id', 'kind', 'name', 'muted', 'locked', 'clips']);
-const CLIP_KEYS = new Set(['id', 'start', 'duration', 'in', 'src', 'text', 'gain']);
-const PROJECT_KEYS = new Set(['version', 'fps', 'width', 'height', 'name', 'rev', 'layers']);
+const LAYER_KEYS = new Set(['id', 'kind', 'name', 'muted', 'locked', 'clips', 'gain', 'pan', 'link', 'points']);
+const CLIP_KEYS = new Set(['id', 'start', 'duration', 'in', 'src', 'text', 'gain', 'pan', 'speed', 'opacity', 'zoom']);
+const PROJECT_KEYS = new Set(['version', 'fps', 'width', 'height', 'name', 'rev', 'layers', 'master', 'notes']);
+const NOTE_KEYS = new Set(['id', 'at', 'text', 'done']);
+export const MAX_NOTES = 200;
 
 /**
  * Validate a project. Returns `{ ok: true }` or `{ ok: false, errors: [{ code, path, message }] }` (all problems, in document
@@ -112,12 +122,16 @@ export function validateProject(p) {
   if (p.version !== PROJECT_VERSION) bad(ERR.BAD_VERSION, 'version', `version must be ${PROJECT_VERSION}.`);
   if (!isInt(p.fps) || p.fps < 1 || p.fps > 120) bad(ERR.BAD_FPS, 'fps', 'fps must be a whole number from 1 to 120.');
   for (const k of ['width', 'height']) if (p[k] !== undefined && (!isInt(p[k]) || p[k] < 16 || p[k] > 7680)) bad(ERR.BAD_SIZE, k, `${k} must be a whole number from 16 to 7680.`);
+  if (p.master !== undefined && (typeof p.master !== 'number' || !Number.isFinite(p.master) || p.master < 0 || p.master > 4)) bad(ERR.BAD_GAIN, 'master', 'master is a number from 0 to 4: the volume of the whole mix (1 is unchanged).');
   if (p.name !== undefined && (typeof p.name !== 'string' || p.name.length > 120)) bad(ERR.BAD_NAME, 'name', 'name must be text of at most 120 characters.');
   if (p.rev !== undefined && (!isInt(p.rev) || p.rev < 0)) bad(ERR.BAD_REV, 'rev', 'rev must be a whole number, 0 or more.');
   if (!Array.isArray(p.layers) || p.layers.length > 64) {
     bad(ERR.BAD_LAYERS, 'layers', 'layers must be a list of at most 64 layers.');
     return { ok: false, errors };
   }
+  const clipKinds = new Map(); // clip id -> the kind of layer it is on, so an automation layer's link can be checked against it
+  const links = new Set();
+  for (const l of p.layers) if (isObj(l) && Array.isArray(l.clips)) for (const c of l.clips) if (isObj(c) && typeof c.id === 'string') clipKinds.set(c.id, l.kind);
   const ids = new Set();
   const claim = (id, where) => {
     if (typeof id !== 'string' || !ID_RE.test(id)) return bad(ERR.BAD_ID, where, 'An id is 1-40 characters of A-Z a-z 0-9 _ -.');
@@ -134,6 +148,25 @@ export function validateProject(p) {
     if (!KINDS.includes(l.kind)) bad(ERR.BAD_KIND, `${lp}.kind`, `kind must be one of ${KINDS.join(', ')}.`);
     if (typeof l.name !== 'string' || l.name.length > 80) bad(ERR.BAD_NAME, `${lp}.name`, 'A layer name is text of at most 80 characters.');
     for (const f of ['muted', 'locked']) if (typeof l[f] !== 'boolean') bad(ERR.BAD_FLAG, `${lp}.${f}`, `${f} must be true or false.`);
+    if (l.gain !== undefined && (typeof l.gain !== 'number' || !Number.isFinite(l.gain) || l.gain < 0 || l.gain > 4 || (l.kind !== 'voice' && l.kind !== 'music'))) bad(ERR.BAD_GAIN, `${lp}.gain`, 'a layer gain is a number from 0 to 4 and only voice and music layers have one.');
+    if (l.pan !== undefined && (typeof l.pan !== 'number' || !Number.isFinite(l.pan) || l.pan < -1 || l.pan > 1 || (l.kind !== 'voice' && l.kind !== 'music'))) bad(ERR.BAD_PAN, `${lp}.pan`, 'a layer pan is a number from -1 (left) to 1 (right) and only voice and music layers have one.');
+    if (l.kind === 'automation') {
+      // an automation layer is a line linked to one param of one clip; it holds no clips of its own
+      const lk = l.link;
+      if (lk === null || typeof lk !== 'object' || Array.isArray(lk) || Object.keys(lk).some((k) => k !== 'clipId' && k !== 'param')) bad(ERR.BAD_AUTOMATION, `${lp}.link`, 'link is { clipId, param }.');
+      else {
+        const target = clipKinds.get(lk.clipId);
+        if (!target) bad(ERR.BAD_AUTOMATION, `${lp}.link.clipId`, `the linked clip "${String(lk.clipId).slice(0, 40)}" is not in the project.`);
+        else {
+          const why = lineProblem(lk.param, l.points, target);
+          if (why) bad(ERR.BAD_AUTOMATION, `${lp}.points`, why);
+          const key = `${lk.clipId}\0${lk.param}`;
+          if (links.has(key)) bad(ERR.BAD_AUTOMATION, `${lp}.link`, `two lines drive ${lk.param} of clip ${lk.clipId}; a param has one line.`);
+          links.add(key);
+        }
+      }
+      if (Array.isArray(l.clips) && l.clips.length) bad(ERR.BAD_CLIPS, `${lp}.clips`, 'an automation layer holds no clips; it draws a line for a clip on another layer.');
+    } else if (l.link !== undefined || l.points !== undefined) bad(ERR.BAD_AUTOMATION, `${lp}.link`, 'only an automation layer has a link and points.');
     if (!Array.isArray(l.clips)) return bad(ERR.BAD_CLIPS, `${lp}.clips`, 'clips must be a list.');
     l.clips.forEach((c, ci) => {
       const cp = `${lp}.clips[${ci}]`;
@@ -153,10 +186,42 @@ export function validateProject(p) {
         if (c.text !== undefined) bad(ERR.BAD_TEXT, `${cp}.text`, 'Only a subtitle clip has text.');
       }
       if (c.gain !== undefined && (typeof c.gain !== 'number' || !Number.isFinite(c.gain) || c.gain < 0 || c.gain > 4 || l.kind === 'video' || l.kind === 'subtitle')) bad(ERR.BAD_GAIN, `${cp}.gain`, 'gain is a number from 0 to 4 and only voice and music clips have one.');
+      if (c.pan !== undefined && (typeof c.pan !== 'number' || !Number.isFinite(c.pan) || c.pan < -1 || c.pan > 1 || (l.kind !== 'voice' && l.kind !== 'music'))) bad(ERR.BAD_PAN, `${cp}.pan`, 'pan is a number from -1 (left) to 1 (right) and only voice and music clips have one.');
+      if (c.speed !== undefined) {
+        const why = MEDIA_KINDS.has(l.kind) ? speedProblem(c.speed) : 'only video, voice and music clips have a speed.';
+        if (why) bad(ERR.BAD_SPEED, `${cp}.speed`, why);
+      }
+      if (c.opacity !== undefined) {
+        const why = l.kind === 'video' ? opacityProblem(c.opacity) : 'only video clips have an opacity.';
+        if (why) bad(ERR.BAD_OPACITY, `${cp}.opacity`, why);
+      }
+      if (c.automation !== undefined) {
+        const why = automationProblem(c.automation, { kind: l.kind });
+        if (why) bad(ERR.BAD_AUTOMATION, `${cp}.automation`, why);
+      }
+      if (c.zoom !== undefined) {
+        const why = l.kind === 'video' ? zoomProblem(c.zoom) : 'only video clips have a zoom.';
+        if (why) bad(ERR.BAD_ZOOM, `${cp}.zoom`, why);
+      }
       return undefined;
     });
   });
   if (clipCount > 5000) bad(ERR.BAD_CLIPS, 'layers', 'A project holds at most 5000 clips.');
+  if (p.notes !== undefined) {
+    if (!Array.isArray(p.notes) || p.notes.length > MAX_NOTES) bad(ERR.BAD_NOTE, 'notes', `notes is a list of at most ${MAX_NOTES} notes.`);
+    else {
+      p.notes.forEach((n, ni) => {
+        const np = `notes[${ni}]`;
+        if (!isObj(n)) return bad(ERR.BAD_NOTE, np, 'A note is a JSON object { id, at, text, done? }.');
+        for (const k of Object.keys(n)) if (!NOTE_KEYS.has(k)) bad(ERR.UNKNOWN_FIELD, `${np}.${k}`, `Unknown note field "${k}".`);
+        claim(n.id, `${np}.id`);
+        if (!isInt(n.at) || n.at < 0 || n.at > MAX_MS) bad(ERR.BAD_TIME, `${np}.at`, 'at must be whole milliseconds, 0 or more.');
+        if (typeof n.text !== 'string' || !n.text.trim() || n.text.length > MAX_TEXT) bad(ERR.BAD_NOTE, `${np}.text`, `A note needs text of 1-${MAX_TEXT} characters.`);
+        if (n.done !== undefined && typeof n.done !== 'boolean') bad(ERR.BAD_NOTE, `${np}.done`, 'done is true or false.');
+        return undefined;
+      });
+    }
+  }
   if (!errors.length) for (const l of p.layers) for (const [a, b] of overlaps(l)) bad(ERR.OVERLAP, `layers.${l.id}`, `Clips ${a} and ${b} overlap on a ${l.kind} layer.`);
   return errors.length ? { ok: false, errors } : { ok: true };
 }

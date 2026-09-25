@@ -28,11 +28,17 @@ export const CONFIG_FILE = 'studio.config.json';
 /** Keys that can only be changed by editing studio.config.json, never through the HTTP API (they name a command or a file). */
 export const FILE_ONLY_KEYS = Object.freeze(['tts.ttsCmd', 'tts.voiceSample']);
 
+/** The cloned-voice settings of the website's demo video (docs/MEDIA.md): expressive but close to the speaker, the best
+ * 10-20 s window of the sample as the reference, a slow pace with a longer pause between lines. `ref: 'best'` picks
+ * that window; `tempo` is applied at mix time. Editable in the settings panel (they name numbers, not files). */
+export const VOICE_PRESET = Object.freeze({ exaggeration: 0.7, cfgWeight: 0.3, temperature: 0.8, pauseMs: 650, seed: 1, ref: 'best', tempo: 0.9 });
+const VOICE_LIMITS = Object.freeze({ exaggeration: [0, 2], cfgWeight: [0, 1], temperature: [0.1, 2], pauseMs: [0, 3000], seed: [0, 2147483647], tempo: [0.5, 1.5] });
+
 export const DEFAULT_CONFIG = Object.freeze({
   provider: 'ollama',
   providers: { ollama: { baseUrl: 'http://127.0.0.1:11434' } },
   models: { planner: 'llama3.2', narration: 'llama3.2' },
-  tts: { backend: 'kokoro', voice: 'af_heart', ttsCmd: '', voiceSample: '' },
+  tts: { backend: 'kokoro', voice: 'af_heart', ttsCmd: '', voiceSample: '', settings: VOICE_PRESET },
   allowPrivateNetwork: false,
   recording: { width: 1280, height: 720, pace: 1, burnCaptions: true },
 });
@@ -90,7 +96,7 @@ export function validateConfig(input) {
   if (input.tts !== undefined) {
     if (!isObj(input.tts)) err(CONFIG_ERR.NOT_OBJECT, 'tts', 'tts must be an object');
     else {
-      for (const k of Object.keys(input.tts)) if (!['backend', 'voice', 'ttsCmd', 'voiceSample'].includes(k)) err(CONFIG_ERR.UNKNOWN_KEY, `tts.${k}`, `unknown key "tts.${k}"`);
+      for (const k of Object.keys(input.tts)) if (!['backend', 'voice', 'ttsCmd', 'voiceSample', 'settings'].includes(k)) err(CONFIG_ERR.UNKNOWN_KEY, `tts.${k}`, `unknown key "tts.${k}"`);
       const t = input.tts;
       if (t.backend !== undefined) { if (!TTS_BACKENDS.includes(t.backend)) err(CONFIG_ERR.BAD_TTS_BACKEND, 'tts.backend', `backend must be one of ${TTS_BACKENDS.join(', ')}`); else cfg.tts.backend = t.backend; }
       if (t.voice !== undefined) { if (typeof t.voice !== 'string' || !VOICE_RE.test(t.voice)) err(CONFIG_ERR.BAD_VOICE, 'tts.voice', 'a Kokoro voice id such as af_heart'); else cfg.tts.voice = t.voice; }
@@ -98,6 +104,20 @@ export function validateConfig(input) {
         if (t[k] === undefined) continue;
         if (typeof t[k] !== 'string' || t[k].length > 1000 || /[\u0000\n\r]/.test(t[k])) err(CONFIG_ERR.BAD_VOICE, `tts.${k}`, `${k} must be a single-line string`);
         else cfg.tts[k] = t[k];
+      }
+      if (t.settings !== undefined) {
+        if (!isObj(t.settings)) err(CONFIG_ERR.NOT_OBJECT, 'tts.settings', 'tts.settings must be an object');
+        else {
+          cfg.tts.settings = { ...VOICE_PRESET };
+          for (const [k, v] of Object.entries(t.settings)) {
+            if (k === 'ref') { if (v !== 'best' && v !== 'whole') err(CONFIG_ERR.BAD_VOICE, 'tts.settings.ref', 'ref must be "best" or "whole"'); else cfg.tts.settings.ref = v; }
+            else if (VOICE_LIMITS[k]) {
+              const [lo, hi] = VOICE_LIMITS[k];
+              if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi || (k === 'seed' || k === 'pauseMs' ? !Number.isInteger(v) : false)) err(CONFIG_ERR.BAD_VOICE, `tts.settings.${k}`, `${k} must be ${k === 'seed' || k === 'pauseMs' ? 'a whole number' : 'a number'} from ${lo} to ${hi}`);
+              else cfg.tts.settings[k] = v;
+            } else err(CONFIG_ERR.UNKNOWN_KEY, `tts.settings.${k}`, `unknown key "tts.settings.${k}"`);
+          }
+        }
       }
       if (cfg.tts.backend === 'cmd' && !cfg.tts.ttsCmd) err(CONFIG_ERR.TTS_CMD_REQUIRED, 'tts.ttsCmd', 'backend "cmd" needs ttsCmd, for example: my-tts --in {text_file} --out {out}');
     }
@@ -167,7 +187,7 @@ export function applyUpdate(current, incoming) {
   for (const k of ['models', 'tts', 'recording']) if (isObj(next[k])) merged[k] = { ...current[k], ...next[k] };
   if (isObj(next.providers)) merged.providers = { ...current.providers, ...next.providers };
   // keep the file-only values
-  merged.tts = { ...merged.tts, ttsCmd: current.tts.ttsCmd, voiceSample: current.tts.voiceSample };
+  merged.tts = { ...merged.tts, ttsCmd: current.tts.ttsCmd, voiceSample: current.tts.voiceSample, settings: { ...current.tts.settings, ...(isObj(next.tts) && isObj(next.tts.settings) ? next.tts.settings : {}) } };
   return merged;
 }
 

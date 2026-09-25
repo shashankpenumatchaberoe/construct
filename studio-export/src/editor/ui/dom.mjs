@@ -12,6 +12,16 @@ export function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+/** An icon from the sprite in editor.html (`i-<name>`): a small svg, cloned from the page's icon template, that draws in the button's text colour. */
+export function icon(name, cls = '') {
+  const s = document.getElementById('tpl-icon').content.firstElementChild.cloneNode(true);
+  s.setAttribute('class', `ico ${cls}`.trim());
+  s.querySelector('use').setAttribute('href', `#i-${name}`);
+  return s;
+}
+/** Swap the icon inside a button. */
+export function setIcon(el, name) { const u = el.querySelector('use'); if (u) u.setAttribute('href', `#i-${name}`); }
+
 /** 83500 -> "1:23.5" ; 4000 -> "0:04.0" */
 export function fmt(ms) {
   const s = Math.max(0, ms) / 1000;

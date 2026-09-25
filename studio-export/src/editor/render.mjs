@@ -5,7 +5,7 @@
 // validateProject), so the plan carries no client path; renderProject runs it with `cwd` = the workspace.
 //
 // Picture: a black canvas the length of the project, each video clip trimmed (`-ss in -t duration`), moved to its timeline start
-// and overlaid; gaps stay black. A layer listed first is on top. Sound: voice clips are delayed and mixed; the voice tracks Studio
+// and overlaid; gaps stay black. A layer listed first is on top, and inside a layer the clip that starts first is on top of a later one it overlaps. Sound: voice clips are delayed and mixed; the voice tracks Studio
 // makes are already levelled to -20 LUFS by the media tools (synth.mjs), and gain 1 leaves that level untouched (a per-clip
 // loudnorm would re-level a trimmed slice and undo the user's gain). Music clips are delayed, faded and set to the bed level, then
 // ducked by the voice with the same sidechain compressor script.mjs `mix` uses. A muted layer is left out completely.
@@ -14,6 +14,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { stringifySync } from 'subtitle';
+import { atempoFactors, balance } from './ui/effects.mjs';
+
+export { balance };
 import { EditorError, ERR, SLUG_RE, assertProject, isBareName, isInside, openWorkspace, resolveMedia } from './project.mjs';
 import { slugify } from './store.mjs';
 
@@ -30,12 +33,61 @@ const num = (v) => String(Math.round(v * 10000) / 10000);
 export const musicGain = (clip) => (clip.gain !== undefined ? clip.gain : Math.round(10 ** (MUSIC_BED_DB / 20) * 10000) / 10000);
 export const voiceGain = (clip) => (clip.gain !== undefined ? clip.gain : 1);
 
+/**
+ * An ffmpeg expression for an automation line: the value at the time in variable `tv` (seconds from the clip start), the same curve the preview draws
+ * (laneValueAt): the first value before the first point, the last after the last, and between two points the segment's curve. The tree is balanced, so a
+ * line of hundreds of points is only a few levels deep. `hold` keeps the point's value until the next one.
+ */
+export function lineExpr(points, tv = 't') {
+  const T = (pt) => sec(pt.t);
+  const segment = (k) => {
+    const a = points[k];
+    const b = points[k + 1];
+    if (a.curve === 'hold') return num(a.v);
+    const u = `clip((${tv}-${T(a)})/${sec(b.t - a.t)},0,1)`;
+    const shape = { linear: u, 'ease-in': `${u}*${u}`, 'ease-out': `(1-(1-${u})*(1-${u}))`, 'ease-in-out': `${u}*${u}*(3-2*${u})` }[a.curve];
+    return `(${num(a.v)}+(${num(b.v - a.v)})*(${shape}))`;
+  };
+  const leaf = (k) => (k === points.length - 1 ? num(points[k].v) : segment(k));
+  const pick = (lo, hi) => {
+    if (lo === hi) return leaf(lo);
+    const mid = (lo + hi) >> 1;
+    return `if(lt(${tv},${T(points[mid + 1])}),${pick(lo, mid)},${pick(mid + 1, hi)})`;
+  };
+  return pick(0, points.length - 1);
+}
+
+/**
+ * An ffmpeg expression for how far a clip's picture is zoomed (1 = not at all) at the time in variable `tv` (seconds from the clip's start): the same curve
+ * as zoomAt, a smoothstep up to the scale over `ramp` from `at`, and, with a `hold`, a smoothstep back down after it.
+ */
+export function zoomExpr(zoom, tv = 't') {
+  const ramp = (from) => (zoom.ramp > 0 ? `clip((${tv}-${sec(from)})/${sec(zoom.ramp)},0,1)` : `if(lt(${tv},${sec(from)}),0,1)`);
+  const smooth = (from) => { const r = ramp(from); return `${r}*${r}*(3-2*${r})`; };
+  const k = zoom.hold === null || zoom.hold === undefined ? smooth(zoom.at) : `(${smooth(zoom.at)})-(${smooth(zoom.at + zoom.ramp + zoom.hold)})`;
+  return `(1+${num(zoom.scale - 1)}*(${k}))`;
+}
+
 /** `{ srt, vtt }` text of the (unmuted) subtitle layers, or null when there is nothing to show. */
 export function exportSubtitles(project) {
   const clips = project.layers.filter((l) => l.kind === 'subtitle' && !l.muted).flatMap((l) => l.clips).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
   if (!clips.length) return null;
   const cues = clips.map((c) => ({ type: 'cue', data: { start: c.start, end: c.start + c.duration, text: c.text } }));
   return { srt: stringifySync(cues, { format: 'SRT' }), vtt: stringifySync(cues, { format: 'WebVTT' }) };
+}
+
+/**
+ * The clips of one video layer, bottom first (the last is painted on top). In start order, except that a clip is placed under every
+ * earlier clip it overlaps: the clip that starts first is on top (at the same start, the lower id). Clips that do not overlap keep
+ * plain start order, so a layer without overlaps renders exactly as before.
+ */
+export function paintOrder(clips) {
+  const out = [];
+  for (const c of [...clips].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))) {
+    const i = out.findIndex((o) => o.start < c.start + c.duration && c.start < o.start + o.duration);
+    if (i < 0) out.push(c); else out.splice(i, 0, c);
+  }
+  return out;
 }
 
 /**
@@ -50,7 +102,7 @@ export function buildRenderPlan(project, { slug, burnSubtitles = false, locate =
   const of = (kind) => live.filter((l) => l.kind === kind).flatMap((l) => l.clips.map((c) => ({ ...c, layer: l.id })));
   const videos = [];
   // A layer listed first is on top, so overlay the last layer first.
-  for (const l of [...live].reverse()) if (l.kind === 'video') videos.push(...[...l.clips].sort((a, b) => a.start - b.start));
+  for (const l of [...live].reverse()) if (l.kind === 'video') videos.push(...paintOrder(l.clips));
   const voices = of('voice').sort((a, b) => a.start - b.start);
   const musics = of('music').sort((a, b) => a.start - b.start);
   const mediaEnd = [...videos, ...voices, ...musics].reduce((m, c) => Math.max(m, c.start + c.duration), 0);
@@ -60,13 +112,29 @@ export function buildRenderPlan(project, { slug, burnSubtitles = false, locate =
   const H = project.height || 720;
   const subs = exportSubtitles(project);
 
+  // the drawn lines, by clip and param (a muted automation layer is bypassed: the clip's own constant applies)
+  const lines = new Map(project.layers.filter((l) => l.kind === 'automation' && !l.muted).map((l) => [`${l.link.clipId}:${l.link.param}`, l.points]));
   const inputs = [];
   const args = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y'];
-  const input = (c) => { args.push('-ss', sec(c.in), '-t', sec(c.duration), '-i', locate(c.src)); inputs.push(c.src); return inputs.length - 1; };
+  // a clip's `duration` is its length on the timeline; at speed s it plays duration * s of its source
+  const input = (c) => { args.push('-ss', sec(c.in), '-t', sec(c.duration * (c.speed ?? 1)), '-i', locate(c.src)); inputs.push(c.src); return inputs.length - 1; };
   const graph = [`color=c=black:s=${W}x${H}:r=${project.fps}:d=${sec(durationMs)}[b0]`];
   videos.forEach((c, k) => {
     const i = input(c);
-    graph.push(`[${i}:v]setpts=PTS-STARTPTS+${sec(c.start)}/TB,scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,fps=${project.fps},format=yuv420p[v${k}]`);
+    // opacity: the clip's own constant, or a line drawn for it (a per-pixel alpha with the line's value at the frame's time from the clip's start)
+    const opLine = lines.get(`${c.id}:opacity`);
+    let alpha = '';
+    if (opLine) alpha = `,format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*clip(${lineExpr(opLine, `(T-${sec(c.start)})`)},0,1)'`;
+    else if (c.opacity !== undefined && c.opacity !== 1) alpha = `,format=yuva420p,colorchannelmixer=aa=${num(c.opacity)}`;
+    const retime = c.speed !== undefined && c.speed !== 1 ? `(PTS-STARTPTS)/${num(c.speed)}` : 'PTS-STARTPTS';
+    // zoom: zoompan crops the window and scales it back to the frame, per frame. It works on the frame number (the picture is at the project's frame rate by
+    // then, so frame n is n / fps into the clip), and a first step to twice the size keeps a slow zoom from stepping a whole pixel at a time.
+    let zoom = '';
+    if (c.zoom) {
+      const zx = (v, size) => `clip(${num(v)}*${size}-${size}/zoom/2,0,${size}-${size}/zoom)`;
+      zoom = `,fps=${project.fps},scale=${W * 2}:${H * 2},zoompan=z='${zoomExpr(c.zoom, `(on/${project.fps})`)}':x='${zx(c.zoom.x, 'iw')}':y='${zx(c.zoom.y, 'ih')}':d=1:s=${W}x${H}:fps=${project.fps},setsar=1,setpts=PTS+${sec(c.start)}/TB`; // zoompan restarts the clock at 0, so the clip is moved to its place on the timeline after it, not before
+    }
+    graph.push(`[${i}:v]setpts=${retime}${c.zoom ? '' : `+${sec(c.start)}/TB`},scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2${zoom},fps=${project.fps},format=yuv420p${alpha}[v${k}]`);
     graph.push(`[b${k}][v${k}]overlay=eof_action=pass[b${k + 1}]`);
   });
   const last = `b${videos.length}`;
@@ -77,20 +145,55 @@ export function buildRenderPlan(project, { slug, burnSubtitles = false, locate =
   const bus = (clips, tag, gainOf, fade) => clips.map((c, k) => {
     const i = input(c);
     const f = fade ? Math.min(MUSIC_FADE_MS, Math.floor(c.duration / 2)) : 0;
-    const chain = [`[${i}:a]asetpts=PTS-STARTPTS`];
+    const base = `${tag}${k}`;
+    const gLine = lines.get(`${c.id}:gain`);
+    const mLine = lines.get(`${c.id}:mute`);
+    const pLine = lines.get(`${c.id}:pan`);
+    const lg = layerGain.get(c.layer);
+    const lp = layerPan.get(c.layer);
+    // where the chain continues from: the clip's audio, stereo and panned when it is panned (a line pans it over time, per channel)
+    let head = `[${i}:a]asetpts=PTS-STARTPTS${c.speed !== undefined && c.speed !== 1 ? atempoFactors(c.speed).map((f) => `,atempo=${num(f)}`).join('') : ''}`; // atempo speeds the sound up or down without changing its pitch; everything after is on the timeline's clock
+    if (pLine) {
+      const [ll, rl] = balance(lp);
+      const left = `min(1,1-(${lineExpr(pLine)}))${ll !== 1 ? `*${num(ll)}` : ''}`;
+      const right = `min(1,1+(${lineExpr(pLine)}))${rl !== 1 ? `*${num(rl)}` : ''}`;
+      graph.push(`${head},aformat=channel_layouts=stereo,channelsplit=channel_layout=stereo[${base}L][${base}R]`, `[${base}L]volume='${left}':eval=frame[${base}l]`, `[${base}R]volume='${right}':eval=frame[${base}r]`);
+      head = `[${base}l][${base}r]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR`;
+    } else if ((c.pan ?? 0) !== 0 || lp !== 0) {
+      const [cl, cr] = balance(c.pan ?? 0);
+      const [ll, rl] = balance(lp);
+      head += `,aformat=channel_layouts=stereo,pan=stereo|c0=${num(cl * ll)}*c0|c1=${num(cr * rl)}*c1`;
+    }
+    const chain = [head];
     if (f > 0) chain.push(`afade=t=in:st=0:d=${sec(f)}`, `afade=t=out:st=${sec(c.duration - f)}:d=${sec(f)}`);
-    chain.push(`adelay=${c.start}:all=1`, `volume=${num(gainOf(c))}[${tag}${k}]`);
-    graph.push(chain.join(','));
-    return `[${tag}${k}]`;
+    if (gLine || mLine) {
+      // volume and mute lines: one per-frame expression from the start of the clip; the mute line takes the volume down by its own value (1 = silent)
+      const gain = gLine ? `(${lineExpr(gLine)})` : num(gainOf(c) / lg);
+      const mute = mLine ? `*(1-clip(${lineExpr(mLine)},0,1))` : '';
+      chain.push(`volume='${gain}${mute}${lg !== 1 ? `*${num(lg)}` : ''}':eval=frame`, `adelay=${c.start}:all=1`);
+      graph.push(`${chain.join(',')}[${base}]`);
+    } else {
+      chain.push(`adelay=${c.start}:all=1`, `volume=${num(gainOf(c))}`);
+      graph.push(`${chain.join(',')}[${base}]`);
+    }
+    return `[${base}]`;
   });
   const mix = (labels, out) => graph.push(labels.length === 1 ? `${labels[0]}anull[${out}]` : `${labels.join('')}amix=inputs=${labels.length}:normalize=0:duration=longest[${out}]`);
   const hasAudio = voices.length + musics.length > 0;
-  if (voices.length) mix(bus(voices, 'vc', voiceGain, false), 'voice');
-  if (musics.length) mix(bus(musics, 'mc', musicGain, true), 'mus');
+  // a clip's volume is its own gain (or the default) times its layer's volume; the master volume scales the whole mix at the end
+  const layerGain = new Map(project.layers.map((l) => [l.id, l.gain ?? 1]));
+  const layerPan = new Map(project.layers.map((l) => [l.id, l.pan ?? 0]));
+  const withLayer = (fn) => (c) => fn(c) * layerGain.get(c.layer);
+  const master = project.master ?? 1;
+  const mixOut = master === 1 ? 'aout' : 'amaster';
+  if (voices.length) mix(bus(voices, 'vc', withLayer(voiceGain), false), 'voice');
+  if (musics.length) mix(bus(musics, 'mc', withLayer(musicGain), true), 'mus');
   if (voices.length && musics.length) {
-    graph.push(`[voice]apad=whole_dur=${sec(durationMs)},asplit=2[vsc][vmix]`, `[mus][vsc]${DUCK}[duck]`, '[vmix][duck]amix=inputs=2:normalize=0:duration=longest[aout]');
-  } else if (voices.length) graph.push('[voice]anull[aout]');
-  else if (musics.length) graph.push('[mus]anull[aout]');
+    graph.push(`[voice]apad=whole_dur=${sec(durationMs)},asplit=2[vsc][vmix]`, `[mus][vsc]${DUCK}[duck]`, `[vmix][duck]amix=inputs=2:normalize=0:duration=longest[${mixOut}]`);
+  } else if (voices.length) graph.push(`[voice]anull[${mixOut}]`);
+  else if (musics.length) graph.push(`[mus]anull[${mixOut}]`);
+  // above unity the master could push the mix past full scale: a limiter catches the peaks (the level below 1 needs none)
+  if (hasAudio && master !== 1) graph.push(`[amaster]volume=${num(master)}${master > 1 ? ',alimiter=limit=0.97' : ''}[aout]`);
 
   if (softSubs) { args.push('-i', subInputName); inputs.push(subInputName); }
   const outName = `${slug}.export.webm`;
