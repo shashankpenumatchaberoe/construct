@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ActivityBar } from '../components/ActivityBar';
 import { EmptyPanel } from '../components/EmptyPanel';
+import { RailSubTabs } from '../components/RailSubTabs';
 import { ShellLayout } from '../components/ShellLayout';
 import { StatusBar } from '../components/StatusBar';
 import { TabHost } from '../components/TabHost';
@@ -18,8 +19,18 @@ export function ShellPage(props: ShellPageProps): ReactNode {
       activeId={activeTabs[region]}
       onSelect={(id) => onSelectTab(region, id)}
       empty={region === 'browser' ? <EmptyPanel title="Nothing to browse on this screen" hint="Choose Features, Pages, Components, Git or Tests in the menu on the left; Settings, Local model and Help are in the profile menu." /> : undefined}
+      // #683: the Browser pane's own sub-tabs (Features/Notes, ...) no longer render as this
+      // host's horizontal tablist -- they render as vertical entries under the rail instead
+      // (below), so this pane keeps only the active tab's content.
+      hideList={region === 'browser'}
     />
   );
+  // Only in the wide layout, and only while the Browser pane is open: the narrow layout already
+  // shows one pane at a time with its own bottom bar, and a closed pane has no content to switch
+  // between. Renders nothing itself when the active screen registered no browser tabs (#683).
+  const browserSubTabs = !props.narrow && props.layout.left.open ? (
+    <RailSubTabs label="Browser" tabs={tabs.browser} activeId={activeTabs.browser} onSelect={(id) => onSelectTab('browser', id)} />
+  ) : null;
   return (
     <ShellLayout
       layout={props.layout}
@@ -31,14 +42,17 @@ export function ShellPage(props: ShellPageProps): ReactNode {
       onNarrowPane={props.onNarrowPane}
       focus={props.focus}
       rail={
-        <ActivityBar
-          screens={props.screens}
-          activeScreenId={props.activeScreenId}
-          screenBadges={props.screenBadges}
-          collapsed={props.railCollapsed}
-          onToggleCollapsed={props.onToggleRail}
-          orientation={props.narrow ? 'horizontal' : 'vertical'}
-        />
+        <>
+          <ActivityBar
+            screens={props.screens}
+            activeScreenId={props.activeScreenId}
+            screenBadges={props.screenBadges}
+            collapsed={props.railCollapsed}
+            onToggleCollapsed={props.onToggleRail}
+            orientation={props.narrow ? 'horizontal' : 'vertical'}
+          />
+          {browserSubTabs}
+        </>
       }
       top={
         <TopBar
