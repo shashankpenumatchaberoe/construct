@@ -60,7 +60,7 @@ needs to change to support it.
 | `construct research summarize / doctor` | Deterministic, read-only | No | No |
 | `construct import <name> ... --from <path> [--llm <provider>]` | Deterministic scaffold + `TODO(import)` breadcrumb, always | **Optional, execution-class.** One call *per generated file*, only if `--llm` given. Never reads the old source file at all unless `--llm` is given. | No |
 | `construct import --plan <path> [--llm <provider>]` | Deterministic, batched: runs the same per-unit scaffold (+ optional fill) once per unit in the plan | Same as above, applied uniformly across every unit | No — the plan itself was already human-approved *before* being handed to this command (see `import --route` below, which is how a plan is normally produced) |
-| `construct import --route <path>` (standalone wizard) | Deterministic scaffold once a plan is approved | **Always exactly one plan-analysis call** (whole-feature, provider = Settings' `planAnalysis` (default `claude`; `ollama` is rejected) — see "How Settings is consumed" below) up front. **Optionally** one execution-class fill call per generated file afterward, if the user opts in mid-wizard. | **Yes — hard gate.** Shows the proposed plan and explicitly asks "Approve this plan and build it now? [y/N]" before writing anything. |
+| `construct import --route <path> [--planner mechanical]` (standalone wizard) | Deterministic scaffold once a plan is approved. `--planner mechanical` (#605, `packages/core/mechanical-plan.mjs`) also makes the *plan itself* deterministic: it reads each traced file's syntax tree (JSX, own state/effects, fetch/storage I/O, reducer/machine shape, pure exports) and returns the same `{feature, units}` shape a model call would, with a reason per layer and skipped files (types-only, barrels) listed with why — no LLM call at all for that route. | **Default (`--planner ai`, or omitted): always exactly one plan-analysis call** (whole-feature, provider = Settings' `planAnalysis` (default `claude`; `ollama` is rejected) — see "How Settings is consumed" below) up front. **With `--planner mechanical`: zero.** **Optionally** one execution-class fill call per generated file afterward either way, if the user opts in mid-wizard. | **Yes — hard gate, either planner.** Shows the proposed plan (repaired by the same `normalizePlanLayers`) and explicitly asks "Approve this plan and build it now? [y/N]" before writing anything. |
 | `construct repl` | Interactive shell wrapping every command above | No calls of its own — whatever the dispatched command does | Whatever the dispatched command does |
 
 ## The UI layer (`ui/`)
@@ -95,12 +95,14 @@ whatever Settings says for that capability.**
 |---|---|---|
 | Dashboard **Create** form (layer / vertical slice) → `POST /api/create` | "Have the LLM write the implementation" checkbox (`useLlm: true`, default off; hidden for "a new feature") | `createFill` |
 | Dashboard **Import** form → `POST /api/import` | "Have the LLM write the ported logic" checkbox (`useLlm: true`); the old free-text Provider field is gone. A direct API caller may still send an explicit `llm: '<provider>'`, which wins. | `importFill` |
-| **Import Wizard** (`/ws/wizard` → `importRouteWizard`) | Plan analysis is inherent to the wizard; the per-file fill is opt-in mid-wizard ("should the LLM also write the ported logic?") | `planAnalysis` for the analysis call, `importFill` for the fill |
+| **Import Wizard** (`/ws/wizard` → `importRouteWizard`) | Plan analysis is inherent to the wizard unless "Plan with: Mechanical" is picked (`planner: 'mechanical'`), which skips the analysis call entirely; the per-file fill is opt-in mid-wizard either way ("should the LLM also write the ported logic?") | `planAnalysis` for the analysis call (ignored when `planner: 'mechanical'`), `importFill` for the fill |
 
-`importRouteWizard(ask, seedRoute, { planAnalysis = 'claude', importFill = 'claude' })`
-takes the two providers as options (the plain CLI keeps the `claude`
-defaults); `planAnalysis: 'ollama'` is rejected inside the wizard as well as
-in `updateSettings`, before any call or write.
+`importRouteWizard(ask, seedRoute, { planAnalysis = 'claude', importFill = 'claude', planner = 'ai' })`
+takes the two providers plus `planner` as options (the plain CLI keeps the
+`claude`/`ai` defaults, overridden by `--planner mechanical`);
+`planAnalysis: 'ollama'` is rejected inside the wizard as well as
+in `updateSettings`, before any call or write — that check is skipped only
+when `planner: 'mechanical'` has already ruled out any plan-analysis call.
 
 ## LLM output is validated before it is written
 

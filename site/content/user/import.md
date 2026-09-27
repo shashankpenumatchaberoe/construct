@@ -12,7 +12,15 @@ construct import PriceCheck --feature pricing --layers domain,hook --from ./old/
 construct import --route /v2/home
 ```
 
-The route wizard traces the real import graph from that route's page, proposes a plan for the whole feature, and asks **"Approve this plan and build it now?"** before writing anything. It makes exactly one analysis call, to a hosted model, to produce the plan. Afterwards it runs `validate` and tells you what is left to fill in. The same wizard is available as the Import Wizard in the [Cockpit UI](@user-guide/cockpit/).
+The route wizard traces the real import graph from that route's page, proposes a plan for the whole feature, and asks **"Approve this plan and build it now?"** before writing anything. By default it makes exactly one analysis call, to a hosted model, to produce the plan. Afterwards it runs `validate` and tells you what is left to fill in. The same wizard is available as the Import Wizard in the [Cockpit UI](@user-guide/cockpit/).
+
+### Plan without a model: `--planner mechanical`
+
+```bash
+construct import --route /v2/home --planner mechanical
+```
+
+Reads each traced file's syntax tree — JSX, its own state/effects, fetch/storage I/O, reducer/machine shape, plain exported functions — and computes the same `{ feature, units }` plan no LLM call, instantly, offline, repeatably. Every layer the plan proposes prints a one-line reason (`hook: keeps its own state/effects in the component (useState)`), and files it leaves out (types-only, a barrel) are listed with why. The plan still goes through the same approval step and the same deterministic repair (`normalizePlanLayers`) as the AI-produced plan — only how the plan is computed changes. AI stays the default until it's been compared against the mechanical plan on more real routes; pick "Plan with: Mechanical" in the Cockpit wizard for the same choice.
 
 ## From an approved plan
 
