@@ -35,6 +35,14 @@ const nextConfig: NextConfig = {
   // `@line/cockpit` npm package ship — the correct shape for a compiled
   // redistributable instead of requiring a full `npm install` on the target.
   output: 'standalone',
+  // #595: the dev-mode indicator (<nextjs-portal>, the floating "N" badge)
+  // sits over whatever's underneath and swallows pointer events on the real
+  // page — Playwright saw it intercept a click in the Pages Editor tree
+  // panel. It only ever renders in `next dev`; a production/standalone
+  // build never includes it regardless of this flag. Off everywhere in dev
+  // (not just under Playwright) so the app behaves the same for a human
+  // clicking near the same corner.
+  devIndicators: false,
   turbopack: {
     root: path.resolve(__dirname),
   },
