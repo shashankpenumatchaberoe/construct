@@ -9,8 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCREENSHOTS_DIR = path.resolve(__dirname, '../../screenshots/demos');
 fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
-// bin/construct.mjs, the real CLI entry point, run exactly as a user would
-// run it — never a mocked/hand-written stand-in for its output.
+// packages/cli/construct.mjs, the real CLI entry point, run exactly as a
+// user would run it — never a mocked/hand-written stand-in for its output.
 const CLI_BIN = path.resolve(__dirname, '../../../../packages/cli/construct.mjs');
 const OPENAPI_FIXTURE = path.resolve(__dirname, '../../../../fixtures/openapi-products/products.yaml');
 // Overridable so this spec can run against any E2E_SERVER_PORT (the config
