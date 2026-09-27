@@ -19,7 +19,18 @@ import { processSummary, createProcess } from '../../../packages/engine/processM
 import { createProcessEngine } from '../../../packages/engine/processEngine.mjs';
 import { createBotRunner, botBranch } from '../../../packages/engine/botRunner.mjs';
 import { createApprovalGate, GATE_CODES } from '../../../packages/engine/approvalGate.mjs';
-import { composeExecutors } from './reviewAnalyses.mjs';
+import { composeExecutors, ANALYSIS_FLOW } from './reviewAnalyses.mjs';
+import { TEST_RUN_FLOW } from './testRuns.mjs';
+
+// #417: a Review analysis or a Tests-tab run must never queue behind a running bot plan. Both are
+// exactly one step, and that step's flow says which world it belongs to (`isAnalysisPlan`/
+// `isTestRunPlan` check the same thing for a whole plan; this checks it for a live process record,
+// whose `steps` are what the engine actually runs). Anything else — every real bot plan — is `write`.
+const READ_LANE_FLOWS = new Set([ANALYSIS_FLOW, TEST_RUN_FLOW]);
+function laneOf(record) {
+  const steps = record?.steps;
+  return Array.isArray(steps) && steps.length > 0 && steps.every((s) => READ_LANE_FLOWS.has(s?.flow)) ? 'read' : 'write';
+}
 
 /** The UI verbs and the machine event each one sends. The client may only
  * name a verb; whether it is legal now is decided by the machine. */
@@ -124,7 +135,15 @@ export function createProcessesService({ getProjectDir, stateDir = resolveStateD
     runner ||= createBotRunner({ stateDir });
     const bot = runner.executeStep;
     const routed = reviewExecutor || testRunExecutor;
-    return { executeStep: routed ? composeExecutors({ bot, review: reviewExecutor?.executeStep ?? bot, testRun: testRunExecutor?.executeStep ?? null }) : bot, maxConcurrent: runner.maxConcurrent };
+    if (!routed) return { executeStep: bot, maxConcurrent: runner.maxConcurrent };
+    // #417: once a step can be a read-only analysis or test run, it gets its own lane so it never
+    // queues behind a running bot plan. The write lane keeps `runner.maxConcurrent` (default 1) as its
+    // cap — unchanged plan-vs-plan behaviour — plus the box-wide semaphore the engine enforces itself.
+    return {
+      executeStep: composeExecutors({ bot, review: reviewExecutor?.executeStep ?? bot, testRun: testRunExecutor?.executeStep ?? null }),
+      lanes: { write: runner.maxConcurrent, read: 1 },
+      laneOf,
+    };
   };
 
   function open() {
