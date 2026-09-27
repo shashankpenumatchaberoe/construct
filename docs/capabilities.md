@@ -43,6 +43,55 @@ module; *group next* = worth extracting, filed as an issue; *leave* = fine where
 | 28 | **PR health** (five deterministic review indicators between two refs: declared-vs-actual scope, unexplained changes, rule regressions, public surface, flow diff; findings split mechanical vs conversation) | `packages/engine/prHealth.mjs`, `packages/engine/gitTrees.mjs`; `schemas/pr-health.v1.json`; docs in `docs/pr-health.md` | CLI `construct review`, PR review UI (#285) | Det | **Packaged** (reuses `impactFromChangedFiles`, `planTouches`, the workflow narrator; read-only via temporary detached worktrees) |
 | 29 | **Machine spec** (`machine-spec.v1`: an English requirement as sentences with ids, broken down into states, events, guarded transitions and typed functions, every item linked to its sentence by `req`; the deterministic gate that refuses a spec before anything is generated from it: structure, duplicate ids, one initial, unknown states/events, ambiguous transitions, unreachable states, untyped functions, uncovered or contradicted sentences, exits from final states -- codes `SPEC-001`..`SPEC-012`, each with a path and a reason) | `packages/core/research/machine-spec.mjs`; `packages/core/research/machine-spec.v1.schema.json`; worked example in `packages/core/research/examples/`; docs in `docs/machine-spec.md` | CLI `research spec` (#576 R1); `--generate` (R2 spec-to-code); `--read-back` (R4, the spec in plain English per sentence, the narrator's wording, `packages/core/research/readBack.mjs`); `--coverage` (R5, sentence -> functions -> generated files and back, `packages/core/research/coverage.mjs`); R3 `--llm` draft-and-retry and R6 Cockpit table build on it | Det | **Packaged** (pure JSON in, `validate --format json`-shaped result out; no runtime schema engine, ajv asserts schema/validator lockstep in tests) |
 
+## Public npm surface: packages/core and packages/engine (#698)
+
+`packages/engine` had no `package.json` at all (#698), so nothing in it could be imported by
+package name from outside this monorepo (a sibling tool, e.g. Trace/line-matcher, had to reach in
+via relative paths across a workspace boundary). It now ships `@line/construct-engine` with its own
+`exports` map, alongside five gaps closed in `@line/construct-core`'s map. The rule for what gets a
+subpath, applied per module rather than as a blanket export-everything:
+
+- **A row above marked `Packaged`/`Packaged already`, with a real consumer already exercising it** ->
+  exported. That combination is exactly what this table already tracks: a clean single-entry module
+  whose contract is proven by an actual caller, not just written to look reusable.
+- **No row here** -> stays internal. If nothing has classified a module as a packaged block yet, a
+  package-name export is a promise this file hasn't backed up; add the row (and tests) first.
+- **A row here but no consumer yet** -> stays internal even though the code is clean. Exporting an
+  unwired block locks in a contract nothing has exercised; promote it once something depends on it.
+- Security-sensitive but parameterized (allowlist passed in by the caller, not read from ambient
+  config) is exported like anything else `Packaged` — the safety property is in the code, not in
+  hiding the entry point.
+
+**`packages/core` additions** (all five named in the issue's evidence; all already real, standalone,
+`Packaged`/`Packaged already` modules per rows 4, 10, 21 and 22 above — only the export was missing):
+`./llm` (row 4, the one deliberate LLM exception, opt-in only), `./diagnostics` (row 10,
+`makeViolation`/`formatReport`/`ConstructError`/`EXIT_CODES`), `./text-diff` and
+`./file-change-tracker` (row 21, pure/I/O-free pair), `./dir-browser` (row 22 — security-sensitive,
+but the allowlist is a caller-supplied argument, not ambient state, so it exports like any other
+packaged block).
+
+**`packages/engine` exports** (new package `@line/construct-engine`; subpaths are kebab-case
+regardless of the source file's own casing, matching `packages/core`'s existing subpath style):
+`./impact` (row 25 — engine is impact analysis's real home; `@line/construct-core/impact` keeps
+re-exporting it unchanged for back-compat), `./transactional-writer` + `./envelope` + `./pipeline`
+(row 5), `./workflow-generator` + `./controller-binder` + `./page-transformer` (row 6),
+`./default-enforcers` (row 9), `./workflow-narrator` + `./workflow-scenarios` + `./workflow-explain`
++ `./workflow-source` (row 16), `./unit-summary` (row 17 — the single public entry point; its
+`units/` composition internals ship in `files` for the import to resolve but are not their own
+subpaths), `./scope-links` (row 19), `./jsx-source-annotator` + `./preview-bridge` +
+`./preview-vite-plugin` (row 18), `./process-machine` + `./process-model` + `./process-store` +
+`./process-engine` (row 26), `./commit-message` (row 27), `./pr-health` + `./git-trees` (row 28).
+
+**`packages/engine` modules deliberately left internal**: `previewFiber.mjs` (row 18b — "Packaged"
+but explicitly no consumer yet: the injecting proxy and dev-server process that would call it are
+later slices of the same epic; exporting it now would publish a contract nothing has exercised).
+Engine's own `diagnostics.mjs` (per-file TS + rule diagnostics for editor markers) has no row in
+this table — it is CLI/`ui/server` source-view glue, not yet classified as a packaged block. Every
+other engine module without a row above (`approvalGate`, `botRunner`, the `describe*`/`test*`
+generators, `palette`, `planTemplate`, `proofRunner`, `propLinks`, `referenceLinks`, `safeFetch`,
+`tsFileMove`, `verifyRunner`, `gitVersion`, `units/*`) stays internal for the same reason: add the
+row (and prove the contract with a consumer) before adding the export.
+
 ## How to use this file
 
 - Before writing a helper, check the table. If a block exists, import it; if it is nearly right, extend it

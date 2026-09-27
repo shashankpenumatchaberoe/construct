@@ -1,0 +1,56 @@
+{
+  "name": "@line/construct-engine",
+  "version": "0.9.0",
+  "description": "Construct's deterministic execution engine: transactional writes, zero-LLM generators, the workflow/process/preview/PR-health machinery that packages/core's plan/validate/summarize/impact blocks are assembled on top of. No CLI (see @line/construct), no UI.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./impact": "./impact.mjs",
+    "./transactional-writer": "./transactionalWriter.mjs",
+    "./envelope": "./envelope.mjs",
+    "./pipeline": "./pipeline.mjs",
+    "./workflow-generator": "./workflowGenerator.mjs",
+    "./controller-binder": "./controllerBinder.mjs",
+    "./page-transformer": "./pageTransformer.mjs",
+    "./default-enforcers": "./defaultEnforcers.mjs",
+    "./workflow-narrator": "./workflowNarrator.mjs",
+    "./workflow-scenarios": "./workflowScenarios.mjs",
+    "./workflow-explain": "./workflowExplain.mjs",
+    "./workflow-source": "./workflowSource.mjs",
+    "./workflow-editor": "./workflowEditor.mjs",
+    "./workflow-context": "./workflowContext.mjs",
+    "./unit-summary": "./unitSummary.mjs",
+    "./scope-links": "./scopeLinks.mjs",
+    "./jsx-source-annotator": "./jsxSourceAnnotator.mjs",
+    "./preview-bridge": "./previewBridge.mjs",
+    "./preview-vite-plugin": "./previewVitePlugin.mjs",
+    "./process-machine": "./processMachine.mjs",
+    "./process-model": "./processModel.mjs",
+    "./process-store": "./processStore.mjs",
+    "./process-engine": "./processEngine.mjs",
+    "./commit-message": "./commitMessage.mjs",
+    "./pr-health": "./prHealth.mjs",
+    "./git-trees": "./gitTrees.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "*.mjs",
+    "!*.test.mjs",
+    "units/"
+  ],
+  "dependencies": {
+    "@xstate/graph": "^3.0.4",
+    "estree-walker": "^3.0.3",
+    "ipaddr.js": "2.5.0",
+    "js-yaml": "^4.3.2",
+    "react-docgen": "^8.0.4",
+    "xstate": "^5.33.2"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  }
+}
