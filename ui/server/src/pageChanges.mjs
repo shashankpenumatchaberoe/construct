@@ -8,12 +8,20 @@ import { buildDiffView } from '../../../packages/core/text-diff.mjs';
 
 export const pageChangeTracker = createChangeTracker();
 
+// #538: keyed by absPath, not the project-relative path. Two different projects can
+// legitimately have the same feature/file (say, both scaffolded "auth"/LoginPage.tsx"), and
+// this tracker is a single process-lifetime singleton shared across every project a session
+// opens. Keying by relPath alone made opening project B's file collide with a baseline left
+// behind by project A's identical relPath, reporting a phantom "external change" the moment
+// the tree loaded. absPath already bakes the project root in, so same-name files in different
+// projects get their own snapshot.
+
 /** Observe the file's current disk content and describe its last external
- * change (or null). The change is per-file and persists until dismissed or
- * until the editor itself saves the file. */
-export function describePageChange(absPath, relPath, tracker = pageChangeTracker) {
-  tracker.observe(relPath, fs.readFileSync(absPath, 'utf8'));
-  const change = tracker.getLastChange(relPath);
+ * change (or null). The change is per-file (by absolute path) and persists
+ * until dismissed or until the editor itself saves the file. */
+export function describePageChange(absPath, tracker = pageChangeTracker) {
+  tracker.observe(absPath, fs.readFileSync(absPath, 'utf8'));
+  const change = tracker.getLastChange(absPath);
   if (!change) return { change: null };
   const { rows, stats } = buildDiffView(change.before, change.after);
   return {
@@ -22,6 +30,6 @@ export function describePageChange(absPath, relPath, tracker = pageChangeTracker
 }
 
 /** Called by the editor's own save path so its writes are never reported as external. */
-export function adoptOwnWrite(relPath, content, tracker = pageChangeTracker) {
-  tracker.adopt(relPath, content);
+export function adoptOwnWrite(absPath, content, tracker = pageChangeTracker) {
+  tracker.adopt(absPath, content);
 }

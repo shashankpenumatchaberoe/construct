@@ -500,9 +500,9 @@ app.get('/api/pages/tree', (req, res) => {
   try {
     const { feature, file } = req.query;
     const root = currentRoot();
-    const { absPath, relPath } = resolvePageFile(root, feature, file);
+    const { absPath } = resolvePageFile(root, feature, file);
     const source = fs.readFileSync(absPath, 'utf8');
-    pageChangeTracker.observe(relPath, source); // #224 baseline: what the editor is showing
+    pageChangeTracker.observe(absPath, source); // #224/#538 baseline: what the editor is showing, keyed by absPath
     res.json(serializeTree(source));
   } catch (e) {
     handlePagesEditorError(res, e);
@@ -542,7 +542,7 @@ function saveAndRespond(res, root, relPath, absPath, patched) {
   }
   const isNew = !fs.existsSync(absPath);
   fs.writeFileSync(absPath, patched);
-  adoptOwnWrite(relPath, patched);
+  adoptOwnWrite(absPath, patched);
   res.json({ ok: true, violations: enforcement.violations, autoCommit: afterSave(root, relPath, isNew), ...serializeTree(patched) });
 }
 
@@ -565,8 +565,8 @@ function afterSave(root, relPath, isNew = false) {
 app.get('/api/pages/changes', (req, res) => {
   try {
     const { feature, file } = req.query;
-    const { absPath, relPath } = resolvePageFile(currentRoot(), feature, file);
-    res.json({ ok: true, ...describePageChange(absPath, relPath) });
+    const { absPath } = resolvePageFile(currentRoot(), feature, file);
+    res.json({ ok: true, ...describePageChange(absPath) });
   } catch (e) {
     handlePagesEditorError(res, e);
   }
@@ -575,8 +575,8 @@ app.get('/api/pages/changes', (req, res) => {
 app.post('/api/pages/changes/dismiss', (req, res) => {
   try {
     const { feature, file } = req.body || {};
-    const { relPath } = resolvePageFile(currentRoot(), feature, file);
-    pageChangeTracker.dismiss(relPath);
+    const { absPath } = resolvePageFile(currentRoot(), feature, file);
+    pageChangeTracker.dismiss(absPath);
     res.json({ ok: true });
   } catch (e) {
     handlePagesEditorError(res, e);
@@ -740,7 +740,7 @@ app.post('/api/pages/palette/wrap', (req, res) => {
     }
     const touched = [result.page.file, result.expression.file, ...result.components.map((c) => c.file)];
     const { violations } = validateArchitecture(root, { files: touched });
-    for (const t of touched) adoptOwnWrite(t, fs.readFileSync(path.join(root, t), 'utf8'));
+    for (const t of touched) adoptOwnWrite(path.join(root, t), fs.readFileSync(path.join(root, t), 'utf8'));
     const newSource = fs.readFileSync(absPath, 'utf8');
     let autoCommit;
     try {
