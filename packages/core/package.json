@@ -36,6 +36,11 @@
     "./backend-summary": "./backend-summary.mjs",
     "./impact": "./impact.mjs",
     "./generate": "./generators.mjs",
+    "./llm": "./llm.mjs",
+    "./text-diff": "./text-diff.mjs",
+    "./diagnostics": "./diagnostics.mjs",
+    "./dir-browser": "./dir-browser.mjs",
+    "./file-change-tracker": "./file-change-tracker.mjs",
     "./typed-contracts": {
       "types": "./typed-contracts/index.ts",
       "default": "./typed-contracts/index.ts"
