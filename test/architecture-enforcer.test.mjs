@@ -526,6 +526,34 @@ test('architecture-valid-react-spa-multi-route fixture classifies each of its 3 
   }
 });
 
+// #699 -- loadConfig/loadLayerGraph used to only ever hand out the framework's plural default
+// folder names (controllers/, services/, ...): a project's own `layers:` override in
+// architecture.yml had no effect, so a project with singular folders (service/ instead of
+// services/) failed classification. This fixture overrides controller/workflow/hook/service/
+// page/component to singular folder names and must validate exactly as cleanly as
+// architecture-valid above.
+test('architecture-valid-singular-layers fixture (a project with singular layer folder names, overridden via layers:) produces zero error-severity violations', () => {
+  const root = path.join(REPO_ROOT, 'fixtures', 'architecture-valid-singular-layers');
+  const res = validateArchitecture(root);
+  const errors = res.violations.filter((v) => v.severity === 'error');
+  assert.deepEqual(errors, []);
+});
+
+test('architecture-valid-singular-layers fixture classifies each singular-named folder as its layer', () => {
+  const root = path.join(REPO_ROOT, 'fixtures', 'architecture-valid-singular-layers');
+  const graph = loadLayerGraph(root);
+  assert.equal(graph.service.pattern, 'features/*/service/**');
+  assert.equal(classifyFile('features/widget/controller/WidgetController.tsx', graph), 'controller');
+  assert.equal(classifyFile('features/widget/workflow/WidgetWorkflow.tsx', graph), 'workflow');
+  assert.equal(classifyFile('features/widget/hook/useWidget.tsx', graph), 'hook');
+  assert.equal(classifyFile('features/widget/service/WidgetService.ts', graph), 'service');
+  assert.equal(classifyFile('features/widget/page/WidgetPage.tsx', graph), 'page');
+  assert.equal(classifyFile('features/widget/component/WidgetComponent.tsx', graph), 'component');
+  // The plural framework default must NOT also match — proves the override, not just an
+  // accidental additional match.
+  assert.equal(classifyFile('features/widget/services/WidgetService.ts', graph), null);
+});
+
 test('architecture-invalid fixture reports exactly the expected rule per manifest entry', () => {
   const dir = path.join(REPO_ROOT, 'fixtures', 'architecture-invalid');
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));

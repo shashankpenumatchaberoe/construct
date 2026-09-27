@@ -196,6 +196,118 @@ export function layersForFramework(framework) {
   return LAYERS_BY_FRAMEWORK[framework] || DEFAULT_LAYERS;
 }
 
+// Names that are valid `canImport` targets but are not themselves layers with
+// files to classify (e.g. a feature's types.ts). Never subject to cycle
+// detection or "does this layer exist" checks. (Re-exported by
+// architecture-graph.mjs, which historically owned this constant.)
+export const PSEUDO_LAYERS = new Set(['types']);
+
+/**
+ * Merge a project's `layers:` override/extension on top of the canonical
+ * defaults. A layer entry may:
+ *  - fully replace `canImport` by specifying it directly, or
+ *  - additively extend the base layer's `canImport` via `addCanImport`.
+ * New layer names not present in the base graph may also be introduced,
+ * provided they declare both `pattern` and `canImport`.
+ */
+export function mergeLayers(base, overrides = {}) {
+  /** @type {Record<string, {pattern?: string, canImport: string[]}>} */
+  const merged = {};
+  for (const [name, def] of Object.entries(base)) {
+    merged[name] = { ...def, canImport: [...(def.canImport || [])] };
+  }
+  for (const [name, def] of Object.entries(overrides || {})) {
+    const existing = merged[name] || { canImport: [] };
+    const { addCanImport, ...defRest } = def;
+    const canImport = Array.isArray(def.canImport)
+      ? [...def.canImport]
+      : [...new Set([...(existing.canImport || []), ...(addCanImport || [])])];
+    merged[name] = { ...existing, ...defRest, canImport };
+  }
+  return merged;
+}
+
+/**
+ * Validate a layer graph: every layer must declare a canImport array, every
+ * edge must point at either a known layer or a pseudo-layer (e.g. `types`),
+ * and the graph (ignoring pseudo-layers and same-layer self-edges, which are
+ * always permitted) must be acyclic. Throws a ConstructError naming the
+ * exact bad edge/cycle on failure.
+ */
+export function validateGraph(layers) {
+  const names = new Set(Object.keys(layers));
+
+  for (const [name, def] of Object.entries(layers)) {
+    if (!def || !Array.isArray(def.canImport)) {
+      throw new ConstructError(
+        `Invalid architecture graph: layer "${name}" is missing a canImport array.`,
+        { exitCode: EXIT_CODES.USAGE_ERROR },
+      );
+    }
+    for (const target of def.canImport) {
+      if (PSEUDO_LAYERS.has(target)) continue;
+      if (!names.has(target)) {
+        throw new ConstructError(
+          `Invalid architecture graph: layer "${name}" declares canImport edge "${name} -> ${target}", but layer "${target}" does not exist.`,
+          { exitCode: EXIT_CODES.USAGE_ERROR },
+        );
+      }
+    }
+  }
+
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map([...names].map((n) => [n, WHITE]));
+
+  function visit(node, stack) {
+    color.set(node, GRAY);
+    for (const target of layers[node].canImport) {
+      if (PSEUDO_LAYERS.has(target) || target === node) continue;
+      if (color.get(target) === GRAY) {
+        throw new ConstructError(
+          `Invalid architecture graph: cycle detected (${[...stack, node, target].join(' -> ')}).`,
+          { exitCode: EXIT_CODES.USAGE_ERROR },
+        );
+      }
+      if (color.get(target) === WHITE) visit(target, [...stack, node]);
+    }
+    color.set(node, BLACK);
+  }
+
+  for (const name of names) {
+    if (color.get(name) === WHITE) visit(name, []);
+  }
+
+  return true;
+}
+
+/**
+ * Resolve the effective layer graph for a project: the framework's base layers (`layersForFramework`)
+ * merged with any `layers:` override from architecture.yml (`mergeLayers`), then validated
+ * (`validateGraph`) so a malformed override — an unknown `canImport` edge, a cycle, a non-mapping
+ * value — is rejected with a clear diagnostic naming the `layers` field instead of silently landing
+ * in the effective config or being dropped (#699). Absent `layers:` returns the framework base
+ * unchanged, so a project that never sets it keeps behaving exactly as before.
+ *
+ * @param {unknown} raw The `layers` value from `architecture.yml`.
+ * @param {string} framework An already-normalized `project.framework` value.
+ * @returns {Record<string, {pattern?: string, canImport: string[]}>} The merged, validated layer graph.
+ * @throws {Error} A usage error when `layers` is not a mapping, or the merged graph is invalid.
+ * @since 0.10
+ *
+ * @example
+ * normalizeLayers({ service: { pattern: 'features/*\/service/**' } }, 'nextjs').service.pattern; // => 'features/*\/service/**'
+ */
+export function normalizeLayers(raw, framework) {
+  const base = layersForFramework(framework);
+  if (raw === undefined || raw === null) return base;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw usageError('layers in architecture.yml must be a mapping of layer name to { pattern, canImport }.');
+  }
+  const merged = mergeLayers(base, raw);
+  validateGraph(merged);
+  return merged;
+}
+
 // Rule severities AND non-architecture thresholds (e.g. a future readability
 // rule like 'READ-002-max-loc') live in this same uniform map. A value is
 // either a bare severity string ('error' | 'warning' | 'off') or an object
@@ -516,7 +628,7 @@ export function readRawRules(root) {
 }
 
 /**
- * Load and normalize a project's `architecture.yml`. A missing file yields the built-in defaults (strict Next.js preset); a present one is merged over them: rules are normalized to severities, the layer graph is chosen from `project.framework`, and `frozen` / `nonLayer` globs are normalized.
+ * Load and normalize a project's `architecture.yml`. A missing file yields the built-in defaults (strict Next.js preset); a present one is merged over them: rules are normalized to severities, the layer graph is chosen from `project.framework` and merged with any `layers:` override (`normalizeLayers`; #699 — it used to be silently discarded here), and `frozen` / `nonLayer` globs are normalized.
  *
  * @param {string} root Project root that contains (or should contain) `architecture.yml`.
  * @returns {{version:number, preset:string, project:object, features:{root:string}, layers:object, rules:object, exceptions:object[], frozen:string[], nonLayer:string[]}} The effective configuration.
@@ -573,7 +685,7 @@ export function loadConfig(root) {
     features: { root: 'features', ...(c.features || {}) },
     traces: normalizeTraces(c.traces),
     decision: normalizeDecision(c.decision),
-    layers: layersForFramework(framework),
+    layers: normalizeLayers(c.layers, framework),
     rules,
     exceptions: c.exceptions || [],
     frozen: normalizeFrozen(c.frozen),
