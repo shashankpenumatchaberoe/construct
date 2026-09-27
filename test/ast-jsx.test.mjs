@@ -34,6 +34,22 @@ test('parseJsxTree numbers nodes in document order and nests via source ranges',
   assert.equal(findParentRecord(byId, 'n0'), null);
 });
 
+test('parseJsxTree records endLine/endColumn and a text length per node (#701)', () => {
+  const src = '<div>\n  <b>hi</b>\n</div>';
+  const { byId } = parseJsxTree(src);
+  const div = byId.get('n0');
+  const b = byId.get('n1');
+  assert.equal(div.line, 1);
+  assert.equal(div.endLine, 3);
+  assert.equal(div.endColumn, 7);
+  assert.equal(div.length, div.end - div.start);
+  assert.equal(div.length, src.length);
+  assert.equal(b.line, 2);
+  assert.equal(b.endLine, 2);
+  assert.equal(b.length, '<b>hi</b>'.length);
+  assert.equal(src.slice(b.start, b.end).length, b.length);
+});
+
 test('jsxAttributes classifies every attribute kind', () => {
   const { byId } = parseJsxTree(PAGE);
   const kinds = Object.fromEntries(byId.get('n1').props.map((p) => [p.name, [p.kind, p.value]]));

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { annotateJsxSource, parseCxSrc } from '../packages/engine/jsxSourceAnnotator.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { annotateJsxSource, annotateJsxFile, parseCxSrc } from '../packages/engine/jsxSourceAnnotator.mjs';
 import { parseJsxTree } from '../packages/ast/index.mjs';
 
 const fixture = (n) => new URL(`./fixtures/annotator/${n}`, import.meta.url);
@@ -53,4 +55,21 @@ test('parseCxSrc splits from the right and rejects garbage', () => {
   assert.deepEqual(parseCxSrc('C:/a/b.tsx:12:3'), { file: 'C:/a/b.tsx', line: 12, column: 3 });
   assert.equal(parseCxSrc('nope'), null);
   assert.equal(parseCxSrc(null), null);
+});
+
+test('annotateJsxFile (#701): standalone entry point reads a file and matches annotateJsxSource', () => {
+  const filePath = fileURLToPath(fixture('Page.input.tsx'));
+  const root = path.dirname(filePath);
+  const { code, count, file } = annotateJsxFile(filePath, { root });
+  assert.equal(file, 'Page.input.tsx');
+  const direct = annotateJsxSource(input, { file: 'Page.input.tsx' });
+  assert.equal(code, direct.code);
+  assert.equal(count, direct.count);
+});
+
+test('annotateJsxFile defaults root to cwd and throws on a missing file', () => {
+  const filePath = fileURLToPath(fixture('Page.input.tsx'));
+  const { file } = annotateJsxFile(filePath);
+  assert.equal(file, path.relative(process.cwd(), filePath).split(path.sep).join('/'));
+  assert.throws(() => annotateJsxFile('/no/such/file.tsx'));
 });
