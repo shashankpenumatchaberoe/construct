@@ -12,6 +12,9 @@ import { aggregateValidation } from '../core/registry.mjs';
 import { createTransaction } from './transactionalWriter.mjs';
 import { createEnvelope } from './envelope.mjs';
 import { rel } from '../core/fs.mjs';
+import { loadConfig } from '../core/config.mjs';
+import { makeViolation } from '../core/diagnostics.mjs';
+import { assertFeature } from '../core/block-kit.mjs';
 import { DEFAULT_ENFORCERS } from './defaultEnforcers.mjs';
 
 /** Merge freshly-committed step outputs into the envelope's `layers` map:
@@ -43,6 +46,41 @@ function mergeLayers(existingLayers, committedByLayer) {
 export function runPipeline(root, inputEnvelope) {
   const feature = inputEnvelope.feature;
   const steps = inputEnvelope.steps || [];
+  const base = createEnvelope(feature, {
+    unboundSlots: inputEnvelope.unboundSlots || [],
+    events: inputEnvelope.events || [],
+    layers: inputEnvelope.layers || {},
+  });
+
+  // A step renders into an existing feature slice; unlike `create.unit`/`create.layer` (#677),
+  // pipeline.run can't auto-scaffold the feature here -- there's nothing to stage that "creates
+  // a feature" inside the all-or-nothing transaction below, only generator-step files. Refuse up
+  // front with the same clear, actionable message block-kit.mjs's `assertFeature` gives
+  // create.store/create.handler/guard.route, instead of letting a nonexistent feature slice fall
+  // through to commit-time validation and surface as a bare SLICE-001 (#727).
+  if (steps.length) {
+    try {
+      assertFeature(root, feature);
+    } catch (err) {
+      const featuresRoot = loadConfig(root).features?.root || 'features';
+      return {
+        ...base,
+        status: 'aborted',
+        diagnostics: [makeViolation({
+          rule: 'SLICE-001',
+          module: 'separation-of-concerns',
+          severity: 'error',
+          file: `${featuresRoot}/${feature}/`,
+          line: 1,
+          message: err.message,
+          why: 'A generator step can only render into a feature slice that already exists; pipeline.run refuses instead of auto-creating one inside its transaction.',
+          expected: [`${featuresRoot}/${feature}/`],
+          suggestedFix: `construct create feature ${feature}`,
+        })],
+      };
+    }
+  }
+
   const txn = createTransaction(root);
   const renderedByLayer = {};
 
@@ -55,12 +93,6 @@ export function runPipeline(root, inputEnvelope) {
 
   const { committed, violations } = txn.commit({
     validate: (shadowRoot) => aggregateValidation(shadowRoot, DEFAULT_ENFORCERS),
-  });
-
-  const base = createEnvelope(feature, {
-    unboundSlots: inputEnvelope.unboundSlots || [],
-    events: inputEnvelope.events || [],
-    layers: inputEnvelope.layers || {},
   });
 
   if (committed) {

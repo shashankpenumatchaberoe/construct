@@ -52,6 +52,19 @@ test('runPipeline aborts (status "aborted") and writes nothing when a step would
   assert.equal(fs.existsSync(path.join(dir, 'features', 'checkout', 'pages', 'BadPage.tsx')), false);
 });
 
+test('runPipeline against a missing feature aborts with a clear, actionable message naming it (#727), not a bare SLICE-001, and writes nothing', () => {
+  const dir = tmpProject(); // only 'checkout' exists
+  const input = createEnvelope('ghost', { steps: [{ layer: 'domain', name: 'Total' }] });
+
+  const output = runPipeline(dir, input);
+
+  assert.equal(output.status, 'aborted');
+  assert.equal(output.diagnostics.length, 1);
+  assert.equal(output.diagnostics[0].rule, 'SLICE-001');
+  assert.match(output.diagnostics[0].message, /Feature "ghost" not found \(looked in features\/ghost\)\. Create it first: construct create feature ghost/);
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'ghost')), false);
+});
+
 test('runPipeline with no steps is a committed no-op that preserves prior envelope state', () => {
   const dir = tmpProject();
   const input = createEnvelope('checkout', { layers: { domain: ['features/checkout/domain/Existing.tsx'] } });
@@ -87,6 +100,18 @@ test('construct pipeline run: exits non-zero and prints an aborted envelope when
   assert.equal(output.status, 'aborted');
   assert.ok(output.diagnostics.some((v) => v.rule === 'PAGE-004'));
   assert.equal(fs.existsSync(path.join(dir, 'features', 'checkout', 'pages', 'BadPage.tsx')), false);
+});
+
+test('construct pipeline run: a missing feature exits non-zero with the clear message in the printed envelope, disk untouched', () => {
+  const dir = tmpProject(); // only 'checkout' exists
+  const input = JSON.stringify(createEnvelope('ghost', { steps: [{ layer: 'domain', name: 'Total' }] }));
+  const res = runCli(['pipeline', 'run'], dir, input);
+
+  assert.equal(res.status, EXIT_CODES.VIOLATIONS, res.stderr);
+  const output = JSON.parse(res.stdout);
+  assert.equal(output.status, 'aborted');
+  assert.match(output.diagnostics[0].message, /Feature "ghost" not found \(looked in features\/ghost\)\. Create it first: construct create feature ghost/);
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'ghost')), false);
 });
 
 test('construct pipeline run: malformed JSON on stdin is a usage error, not an internal crash', () => {
