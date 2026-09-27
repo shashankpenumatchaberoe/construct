@@ -1,3 +1,8 @@
+# NOTE: not this repo's own config. This file (and AGENTS.md next to it)
+# is leftover output from once running `construct init .` in this repo. It
+# describes what Construct generates and enforces on *target* projects
+# that use the tool, not on Construct itself. See CLAUDE.md at the repo
+# root for this repo's actual contributor rules.
 version: 1
 preset: strict-nextjs
 project:

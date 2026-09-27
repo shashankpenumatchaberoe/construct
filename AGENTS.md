@@ -1,5 +1,12 @@
 # Construct Agent Contract
 
+> **This is not this repo's contract.** This file (and `architecture.yml`
+> next to it) is leftover output from once running `construct init .` in
+> this repo. It describes the rules Construct *generates and enforces on
+> target projects* that use the tool — not on Construct itself. If you are
+> working on this repo (the Construct tool), read `CLAUDE.md` at the repo
+> root instead; the rules below do not apply here.
+
 1. Read `architecture.yml` before modifying code.
 2. Respect the default architecture unless the project policy explicitly changes it.
 3. Route → Controller → Workflow → Service → API.
