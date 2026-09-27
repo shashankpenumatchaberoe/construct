@@ -43,7 +43,7 @@ export function createCommandRegistry() {
    * Registers one command. Throws (never partially registers) when `name`/`handler` are missing, or `name` or
    * any of `aliases` collides with a command or alias already registered -- a closed, one-owner-per-word
    * registry, so two contributors can never silently shadow each other.
-   * @param {{name: string, summary?: string, usage?: string, handler: Function, source?: string, aliases?: string[]}} command
+   * @param {{name: string, summary?: string, usage?: string, handler: (args: string[]) => (void | Promise<void>), source?: string, aliases?: string[]}} command
    */
   function register({ name, summary = '', usage = '', handler, source = 'unknown', aliases = [] }) {
     if (!name || typeof name !== 'string') throw new TypeError('register: a command needs a string "name"');
