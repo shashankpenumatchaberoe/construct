@@ -2,7 +2,8 @@
 //
 // `parseJsxTree(source)` assigns ids `n0`, `n1`, ... in source (document) order; an id is only valid for
 // the exact source text it was computed from. Every record carries the element's `[start, end)` offsets
-// in `source`, its 1-based `line` and `column`, its props (see `jsxAttributes`) and its children.
+// in `source`, its 1-based `line` and `column`, its props (see `jsxAttributes`), its element children and
+// its text/expression content (#697 -- additive; see `parseJsxTree`'s doc for the `content` shape).
 import { walkAst } from './walk.mjs';
 import { parseJsx } from './jsxParse.mjs';
 
@@ -51,11 +52,47 @@ export function jsxAttributes(openingElement, source) {
 }
 
 /**
+ * An element/fragment node's immediate text and `{expression}` children, in source order (#697). See
+ * `parseJsxTree`'s doc for the exact shape and the whitespace-only-text and empty-expression rules.
+ *
+ * @param {object} node A JSXElement or JSXFragment node (raw estree, as found by `parseJsxTree`).
+ * @param {string} source The full source text.
+ * @returns {{kind:'text'|'expression', value:string, start:number, end:number}[]} Content records in source order.
+ */
+function jsxContent(node, source) {
+  const content = [];
+  for (const child of node.children ?? []) {
+    if (child.type === 'JSXText') {
+      if (child.value.trim() === '') continue; // whitespace-only: skipped, see parseJsxTree's doc
+      content.push({ kind: 'text', value: child.value, start: child.range[0], end: child.range[1] });
+    } else if (child.type === 'JSXExpressionContainer') {
+      const expr = child.expression;
+      if (expr.type === 'JSXEmptyExpression') continue; // `{/* comment */}`: no value
+      content.push({ kind: 'expression', value: source.slice(expr.range[0], expr.range[1]), start: expr.range[0], end: expr.range[1] });
+    }
+  }
+  return content;
+}
+
+/**
  * Parse `source` into `{ roots, byId, ast }`. Each record is
- * `{id, tag, isFragment, isCustomComponent, props, start, end, line, children, openingElementNode}`
+ * `{id, tag, isFragment, isCustomComponent, props, start, end, line, column, children, content, openingElementNode}`
  * (`openingElementNode` is the raw estree opening element, `null` for a fragment -- internal, for
  * offset-exact attribute edits). Nesting is derived from source ranges, so elements found anywhere in a
  * parent's subtree (inside `{cond && <X/>}` or `.map(...)` callbacks) nest correctly. Throws on a syntax error.
+ *
+ * `content` (#697) lists the element's immediate text and `{expression}` children, in source order:
+ * `{kind, value, start, end}[]` where `kind` is `'text'` or `'expression'`. For `'text'`, `value` is the
+ * JSXText node's raw text and `[start, end)` its exact span, so `source.slice(start, end) === value`
+ * always holds. For `'expression'`, `value` is the JS expression's own source text and `[start, end)` its
+ * own span -- excluding the surrounding `{`/`}` of the `JSXExpressionContainer` (same convention as an
+ * `'expression'`-kind prop in `jsxAttributes`) -- so `source.slice(start, end) === value` holds there too.
+ * An empty `{/* comment only *\/}` container (`JSXEmptyExpression`) is skipped: it has no value. A
+ * **whitespace-only text node is skipped** (not listed in `content` at all) -- most are indentation
+ * between elements, not visible content, and a consumer collecting "every piece of visible text" (#697)
+ * wants signal, not that noise; nothing here flags it, so don't rely on `content` to reconstruct the
+ * original whitespace-exact source. `content` only lists this element's own direct text/expression
+ * children, the same way `children` only lists its own direct element children.
  *
  * @param {string} source JSX or TSX module text.
  * @returns {{roots:object[], byId:Map<string, object>, ast:object}} The element tree.
@@ -65,6 +102,10 @@ export function jsxAttributes(openingElement, source) {
  * @example
  * const { roots, byId } = parseJsxTree('export const A = () => <div><b /></div>;');
  * roots[0].tag; // => 'div'
+ *
+ * @example
+ * const { roots } = parseJsxTree('const A = () => <p>Hi {user.name}!</p>;');
+ * roots[0].content; // => [{kind:'text', value:'Hi ', start:..., end:...}, {kind:'expression', value:'user.name', start:..., end:...}, {kind:'text', value:'!', start:..., end:...}]
  */
 export function parseJsxTree(source) {
   const ast = parseJsx(source);
@@ -95,6 +136,7 @@ export function parseJsxTree(source) {
       line: node.loc?.start.line ?? null,
       column: node.loc ? node.loc.start.column + 1 : null,
       children: [],
+      content: jsxContent(node, source),
       openingElementNode: openingElement,
     };
     byId.set(record.id, record);
