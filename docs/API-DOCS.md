@@ -93,9 +93,12 @@ current baseline and how to lower it.
 `HELP_TOPICS`/`TOPIC_ORDER` (the exact text `construct repl`'s own `help`/`help <topic>` prints, reused verbatim
 rather than re-derived) for every command with an interactive equivalent, plus a JSDoc-derived description/usage
 for the four dispatched commands that have none (`review`, `test`, `template`, `pipeline`) — and renders it as
-one page, `developers/api/cli/`. `dispatchedCommandNames()` parses `bin/construct.mjs`'s own `cmd === '...'`
-checks and `site/test/cliCommands.test.mjs` asserts every dispatched command has a reference entry, so the page
-cannot silently fall behind a new command.
+one page, `developers/api/cli/`. `dispatchedCommandNames()` builds the same `command-registry.mjs` +
+`builtin-commands.mjs` pair `packages/cli/construct.mjs` builds for a real invocation (#700) and reads the
+registered command names off it, so `site/test/cliCommands.test.mjs` can assert every dispatched command has a
+reference entry without regexing source text — the page cannot silently fall behind a new command. An installed
+package's own commands (`plugin-commands.mjs`) are not part of this: the reference documents Construct itself,
+not whatever a given project happens to have installed.
 
 ## Versioned build, manifest, and `construct summarize` links (slice 5, #468)
 

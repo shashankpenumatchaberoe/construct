@@ -1,29 +1,32 @@
-// CLI command reference (#467/#463): every command in the real command registry — `packages/cli/construct.mjs`'s
-// dispatch table, `packages/core/cli.mjs`'s command functions and `packages/core/repl.mjs`'s
+// CLI command reference (#467/#463): every command in the real command registry — `packages/core/command-
+// registry.mjs`, populated by `packages/core/builtin-commands.mjs` exactly the way `packages/cli/
+// construct.mjs` populates it for a real invocation (#700) — plus `packages/core/repl.mjs`'s
 // `HELP_TOPICS`/`TOPIC_ORDER` (the exact text `construct repl`'s own "help"/"help <topic>" prints) — rendered
 // as one page, so this can never say something the CLI itself doesn't. Deterministic; no LLM.
-// `site/test/cliCommands.test.mjs` guards that the command list here never falls behind what
-// `packages/cli/construct.mjs` actually dispatches.
+// `site/test/cliCommands.test.mjs` guards that the command list here never falls behind what the registry
+// actually dispatches.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stripTicketRefs } from './markdown.mjs';
 
 /** A short alias dispatched to the same command as a longer name ("g" -> "generate") — not a command of its
- * own, so it never needs (or gets) its own reference page. */
+ * own, so it never needs (or gets) its own reference page. Kept as a lookup table (rather than read off the
+ * registry's own `aliases`) so a doc page can still say "also g" without importing the registry twice. */
 export const ALIASES = { g: 'generate' };
 
-/** Every top-level command name `packages/cli/construct.mjs` actually dispatches (its own `cmd === '...'`
- * checks), in source order, deduplicated, aliases resolved to their real command — the one source of truth for
- * "is this really a command". */
-export function dispatchedCommandNames(repoRoot) {
-  const src = fs.readFileSync(path.join(repoRoot, 'packages/cli/construct.mjs'), 'utf8');
-  const names = [];
-  for (const m of src.matchAll(/cmd === '([a-zA-Z]+)'/g)) {
-    const name = ALIASES[m[1]] || m[1];
-    if (!names.includes(name)) names.push(name);
-  }
-  return names;
+/** Every top-level command name the CLI actually dispatches — built through the exact same
+ * `createCommandRegistry()` + `registerBuiltinCommands()` pair `packages/cli/construct.mjs` uses for a real
+ * invocation (#700), read from `repoRoot` rather than statically imported so this keeps working for any repo
+ * checkout, not only this one — deduplicated, in registry order (alphabetical; aliases are not separate
+ * entries) — the one source of truth for "is this really a command". Installed-package commands
+ * (`plugin-commands.mjs`) are deliberately not included: the reference page documents Construct itself. */
+export async function dispatchedCommandNames(repoRoot) {
+  const { createCommandRegistry } = await import(pathToFileURL(path.join(repoRoot, 'packages/core/command-registry.mjs')).href);
+  const { registerBuiltinCommands } = await import(pathToFileURL(path.join(repoRoot, 'packages/core/builtin-commands.mjs')).href);
+  const registry = createCommandRegistry();
+  registerBuiltinCommands(registry);
+  return registry.list().map((c) => c.name);
 }
 
 // stripTicketRefs (site/lib/markdown.mjs) handles "(see #96)", "(#314/#316, epic #285)" and "Tracked under
