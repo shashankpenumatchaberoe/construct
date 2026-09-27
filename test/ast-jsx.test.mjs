@@ -77,10 +77,32 @@ test('setAttributeText replaces in place or appends before the closing bracket',
   const src = '<a b="1"   c={2} />';
   const node = parseJsxTree(src).byId.get('n0');
   assert.equal(setAttributeText(src, node, 'b', 'string', 'x"y'), '<a b="x&quot;y"   c={2} />');
-  assert.equal(setAttributeText(src, node, 'z', 'boolean', true), '<a b="1"   c={2} z/>');
+  assert.equal(setAttributeText(src, node, 'z', 'boolean', true), '<a b="1"   c={2} z />');
   const open = '<a>t</a>';
   assert.equal(setAttributeText(open, parseJsxTree(open).byId.get('n0'), 'k', 'number', '4'), '<a k={4}>t</a>');
   assert.equal(renderAttrValue('identifier', 'v'), '={v}');
+});
+
+// #696: a multi-line tag's new attribute must land on its own line at the sibling indentation, and a
+// single-line self-closing tag's existing space before `/>` must survive the insertion.
+test('setAttributeText (#696): indents a new attribute like its siblings on a multi-line tag', () => {
+  const src = '<a\n  b="1"\n  c={2}\n/>';
+  const node = parseJsxTree(src).byId.get('n0');
+  assert.equal(setAttributeText(src, node, 'd', 'string', '3'), '<a\n  b="1"\n  c={2}\n  d="3"\n/>');
+});
+
+test('setAttributeText (#696): indents with the sibling attributes\' own indentation (tabs)', () => {
+  const src = '<a\n\tb="1"\n/>';
+  const node = parseJsxTree(src).byId.get('n0');
+  assert.equal(setAttributeText(src, node, 'c', 'number', 2), '<a\n\tb="1"\n\tc={2}\n/>');
+});
+
+test('setAttributeText (#696): keeps the space before /> on a single-line self-closing tag', () => {
+  const src = '<a b="1" />';
+  const node = parseJsxTree(src).byId.get('n0');
+  assert.equal(setAttributeText(src, node, 'c', 'number', 2), '<a b="1" c={2} />');
+  const noAttrs = '<a />';
+  assert.equal(setAttributeText(noAttrs, parseJsxTree(noAttrs).byId.get('n0'), 'c', 'number', 2), '<a c={2} />');
 });
 
 test('setSpreadText / removeAttributeText', () => {

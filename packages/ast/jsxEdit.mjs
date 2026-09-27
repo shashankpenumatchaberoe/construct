@@ -43,7 +43,11 @@ const namedAttribute = (opening, propName) =>
 
 /**
  * The whole node's new text after setting one named attribute: replaced in place if it exists,
- * otherwise appended at the end of the attribute list (right before the opening tag's `>` / `/>`).
+ * otherwise appended at the end of the attribute list, right after the last existing attribute (or the
+ * tag name, if there are none). The existing whitespace run leading into the closing bracket (`>` /
+ * `/>`), which may be a single space or a newline plus indentation, is left untouched -- so a single
+ * space before `/>` is preserved, and on a multi-line tag the new attribute is inserted on its own new
+ * line, indented like its siblings, ahead of that untouched run (#696).
  *
  * @param {string} source Full source text.
  * @param {object} node An element record from `parseJsxTree`.
@@ -60,9 +64,16 @@ export function setAttributeText(source, node, propName, kind, value) {
     return source.slice(node.start, existing.range[0]) + propName + rendered + source.slice(existing.range[1], node.end);
   }
   const openingEnd = opening.range[1];
-  const insertAt = opening.selfClosing ? openingEnd - 2 : openingEnd - 1;
-  const needsSpace = !/\s$/.test(source.slice(insertAt - 1, insertAt));
-  return source.slice(node.start, insertAt) + (needsSpace ? ' ' : '') + propName + rendered + source.slice(insertAt, node.end);
+  const bracketPos = opening.selfClosing ? openingEnd - 2 : openingEnd - 1;
+  const lastAttr = opening.attributes[opening.attributes.length - 1];
+  const refEnd = lastAttr ? lastAttr.range[1] : opening.name.range[1];
+  if (lastAttr && /\n/.test(source.slice(refEnd, bracketPos))) {
+    const lineStart = source.lastIndexOf('\n', lastAttr.range[0]) + 1;
+    const indent = source.slice(lineStart, lastAttr.range[0]);
+    return source.slice(node.start, refEnd) + `\n${indent}` + propName + rendered + source.slice(refEnd, node.end);
+  }
+  const needsSpace = !/\s/.test(source.slice(refEnd - 1, refEnd));
+  return source.slice(node.start, refEnd) + (needsSpace ? ' ' : '') + propName + rendered + source.slice(refEnd, node.end);
 }
 
 /**
