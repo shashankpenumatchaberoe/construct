@@ -83,6 +83,10 @@ node packages/tools/api-coverage/check.mjs --report   # lists every exported fun
 node packages/tools/api-coverage/check.mjs --update   # rewrites the baseline; refuses to raise it
 ```
 
+Same shape, different signal: `packages/tools/tsc-ratchet/` (#606) ratchets `npm run build`'s
+(`tsc --noEmit`) per-file error count instead of doc-comment gaps — see its README for the
+current baseline and how to lower it.
+
 ## CLI reference (slice 4, #467)
 
 `site/lib/cliCommands.mjs`'s `collectCliCommands()` reads the CLI's real command registry — `src/repl.mjs`'s
