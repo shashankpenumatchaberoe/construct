@@ -3,19 +3,29 @@
 // The OAuth round trip runs against a real Express app with a fake GitHub
 // injected (`fetchImpl`) — no network, but every byte of the real handler
 // code, including the state cookie, the code exchange and the allowlist.
+//
+// workspaceRoot.mjs is imported FIRST (same as settings.test.mjs) so every
+// `resolveAuthConfig` call in this file that omits `CONSTRUCT_SESSION_SECRET`
+// falls back to a private per-process CONSTRUCT_STATE_DIR rather than the
+// developer's real `~/.local/state/construct` (#418).
+import '../../../test-utils/workspaceRoot.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import express from 'express';
+import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
 import {
   AuthConfigError,
   SESSION_COOKIE,
   STATE_COOKIE,
   createAuth,
   isLoopbackHost,
+  loadOrCreatePersistedSecret,
   parseAllowedLogins,
   parseCookies,
   resolveAuthConfig,
   serializeCookie,
+  sessionSecretPath,
   signValue,
   verifySession,
   verifyValue,
@@ -192,6 +202,76 @@ test('the test login is not a second answer to who may use this Cockpit', () => 
 
 test('CONSTRUCT_AUTH=off is honoured on loopback only', () => {
   assert.equal(resolveAuthConfig({ ...OAUTH_ENV, CONSTRUCT_AUTH: 'off' }, { host: '127.0.0.1' }).required, false);
+});
+
+// ---------------------------------------------------------------------------
+// Persisted session secret (#418) — a restart from the same state directory
+// must not sign everyone out.
+// ---------------------------------------------------------------------------
+
+test('two resolveAuthConfig calls with the same state dir yield the same generated secret', () => {
+  const stateDir = makeTempDir('auth-secret-');
+  const first = resolveAuthConfig({}, { host: '127.0.0.1', stateDir });
+  const second = resolveAuthConfig({}, { host: '127.0.0.1', stateDir });
+  assert.equal(first.sessionSecret, second.sessionSecret);
+  assert.equal(first.ephemeralSecret, true);
+  assert.equal(first.sessionSecretFile, sessionSecretPath(stateDir));
+  // Persisted with owner-only permissions.
+  const mode = fs.statSync(sessionSecretPath(stateDir)).mode & 0o777;
+  assert.equal(mode, 0o600);
+  // And it round-trips: the file on disk is exactly the secret handed back.
+  assert.equal(fs.readFileSync(sessionSecretPath(stateDir), 'utf8').trim(), first.sessionSecret);
+});
+
+test('a session cookie signed before a simulated restart still verifies after it, via the persisted secret', () => {
+  const stateDir = makeTempDir('auth-secret-restart-');
+  const before = resolveAuthConfig({}, { host: '127.0.0.1', stateDir });
+  const token = signValue({ login: 'owner-login', exp: Date.now() + 60_000 }, before.sessionSecret);
+  // A fresh resolveAuthConfig call stands in for a fresh server process starting up again.
+  const after = resolveAuthConfig({}, { host: '127.0.0.1', stateDir });
+  assert.ok(verifyValue(token, after.sessionSecret), 'the cookie must still verify against the secret a "restarted" process resolves');
+});
+
+test('an env-provided CONSTRUCT_SESSION_SECRET always wins over a stored one, and touches no file', () => {
+  const stateDir = makeTempDir('auth-secret-env-wins-');
+  const config = resolveAuthConfig({ CONSTRUCT_SESSION_SECRET: SECRET }, { host: '127.0.0.1', stateDir });
+  assert.equal(config.sessionSecret, SECRET);
+  assert.equal(config.ephemeralSecret, false);
+  assert.equal(config.sessionSecretFile, null);
+  assert.equal(fs.existsSync(sessionSecretPath(stateDir)), false);
+});
+
+test('a group/world-readable session-secret file is refused, like ssh refuses such a private key', () => {
+  const stateDir = makeTempDir('auth-secret-perms-');
+  const file = sessionSecretPath(stateDir);
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(file, 'a'.repeat(64), { mode: 0o644 });
+  assert.throws(
+    () => resolveAuthConfig({}, { host: '127.0.0.1', stateDir }),
+    (e) => e instanceof AuthConfigError && /readable or writable by users other than its owner/.test(e.message) && /chmod 600/.test(e.message),
+  );
+  // Fixing the permissions makes it trusted again, unchanged.
+  fs.chmodSync(file, 0o600);
+  assert.equal(resolveAuthConfig({}, { host: '127.0.0.1', stateDir }).sessionSecret, 'a'.repeat(64));
+});
+
+test('loadOrCreatePersistedSecret: a 0640 (group-readable) file is refused just like 0644', () => {
+  const stateDir = makeTempDir('auth-secret-perms-group-');
+  const file = sessionSecretPath(stateDir);
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(file, 'b'.repeat(64), { mode: 0o640 });
+  assert.throws(() => loadOrCreatePersistedSecret(stateDir), (e) => e instanceof AuthConfigError);
+});
+
+test('the startup warning names where the generated secret is stored, once persistence is in play', () => {
+  const stateDir = makeTempDir('auth-secret-warn-');
+  const config = resolveAuthConfig({ CONSTRUCT_AUTH: 'required', CONSTRUCT_AUTH_TEST_USER: 'e2e-user' }, { host: '127.0.0.1', stateDir });
+  const auth = createAuth(config);
+  const warning = auth.describeStartup().find((l) => /CONSTRUCT_SESSION_SECRET is not set/.test(l.text));
+  assert.ok(warning, 'expected the ephemeral-secret warning to be present');
+  assert.match(warning.text, /using a generated secret stored at/);
+  assert.ok(warning.text.includes(sessionSecretPath(stateDir)));
+  assert.match(warning.text, /survive/);
 });
 
 // ---------------------------------------------------------------------------

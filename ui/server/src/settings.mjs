@@ -1,6 +1,9 @@
-// In-memory settings for the UI server: which LLM provider each distinct
-// LLM-touching capability should use, and which Construct project
-// directory every command targets.
+// Settings for the UI server: which LLM provider each distinct LLM-touching
+// capability should use, and which Construct project directory every
+// command targets. The provider choice is persisted at
+// `<stateDir>/settings.json` (#418) so it survives a server restart; the
+// project directory is intentionally NOT auto-reopened (#365 decision) —
+// only offered back as "Reopen <name>" from `last-project.json`.
 //
 // Per-capability, not one global provider (#100/Epic 6.4): the framework
 // has (at least) two distinct classes of LLM call — small, scoped
@@ -19,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PROVIDERS } from '../../../packages/core/llm.mjs';
-import { resolveStateDir } from '../../../packages/engine/processStore.mjs';
+import { resolveStateDir, atomicWriteJson } from '../../../packages/engine/processStore.mjs';
 import { containInWorkspace, containOrNull, currentLogin, normalizeLogin, relativeToWorkspace, WorkspaceError, workspaceRoot } from './workspace.mjs';
 
 // The one hard guardrail from #96: planAnalysis is the whole-feature deep-
@@ -34,8 +37,9 @@ const defaultProvider = Object.keys(PROVIDERS)[0] || null;
 
 // #569 slice 1: the open project and the remembered project are per signed-in login (key = lowercased login, or ''
 // with no session / auth off). Slice 2: the dev server slot is per login too (devServer.mjs). Slice 3: the LLM provider
-// choices are per login (userState().llmProviders). Provider choices were never persisted (in-memory only), so there is
-// no on-disk shape to migrate: every login, including '', starts from the defaults exactly as the old shared object did.
+// choices are per login (userState().llmProviders), and since #418 persisted per login too
+// (`settings.json` / `settings.<login>.json`, mirroring `last-project.json`'s own naming) — a login with no file yet
+// starts from the defaults exactly as the old shared in-memory object did.
 // Slice 4: the command queue is per login with a global concurrency cap (commandRunner.mjs), and a command's exit
 // code is captured per command (diagnostics.mjs withExitCodeSink), never read from the shared `process.exitCode`.
 // Slice 5: the Logs ring buffer is per login (logBuffer.mjs serverLog, a registry of rings; context-less lines
@@ -65,7 +69,7 @@ function userState() {
       projectDir: shared.preloadedProject === null ? null : containOrNull(workspaceRoot(), shared.preloadedProject, { mustBeDir: true }),
       // The project that was open last, offered as "Reopen <name>" and NEVER loaded automatically.
       lastProject: undefined, // undefined = not read from disk yet
-      llmProviders: defaultLlmProviders(),
+      llmProviders: undefined, // undefined = not read from disk yet (see userLlmProviders)
     };
     userStates.set(key, entry);
   }
@@ -129,6 +133,59 @@ function rememberProject(dir) {
   }
 }
 
+const SETTINGS_FILE = 'settings.json';
+
+/** The settings file for `login` ('' = no session keeps the shared `settings.json`), mirroring
+ * `lastProjectFilePath`'s per-login naming and the same safe-segment validation (#418). */
+export function settingsFilePath(login) {
+  return path.join(resolveStateDir(), login === '' ? SETTINGS_FILE : `settings.${normalizeLogin(login)}.json`);
+}
+
+const settingsFile = () => settingsFilePath(currentLogin());
+
+/** Keep only capability/value pairs that are still valid against the REAL `PROVIDERS` map (not a
+ * cached copy), so a settings.json written by an older build that allowed a provider since removed
+ * — or hand-edited — can never resurrect it. Also re-enforces the #96 planAnalysis guardrail, in
+ * case a file predates it. Invalid or missing entries are left out and the default fills them in. */
+function validatedLlmProviders(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const capability of CAPABILITIES) {
+    const value = raw[capability];
+    if (typeof value !== 'string' || !PROVIDERS[value]) continue;
+    if (capability === 'planAnalysis' && PLAN_ANALYSIS_FORBIDDEN_PROVIDERS.has(value)) continue;
+    out[capability] = value;
+  }
+  return out;
+}
+
+/** The per-capability provider choice, persisted at `<stateDir>/settings.json` (#418) so it survives
+ * a server restart; read once per login and cached like `readLastProject`. */
+function userLlmProviders() {
+  const user = userState();
+  if (user.llmProviders === undefined) {
+    let stored = null;
+    try {
+      stored = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')).llmProviders;
+    } catch {
+      /* none saved, or unreadable/corrupt — start from defaults */
+    }
+    user.llmProviders = { ...defaultLlmProviders(), ...validatedLlmProviders(stored) };
+  }
+  return user.llmProviders;
+}
+
+/** Same atomic write (temp file + fsync + rename) processStore.mjs uses for process records, so a
+ * process killed mid-save leaves either the old settings.json or the new one, never a half-written
+ * file the server then refuses to parse on its next start. */
+function persistLlmProviders(llmProviders) {
+  try {
+    atomicWriteJson(settingsFile(), { llmProviders });
+  } catch {
+    /* persisting is a convenience; never fail a provider switch over it (matches rememberProject) */
+  }
+}
+
 /** The open project directory, or null. Re-verified against the workspace on EVERY call (realpath), so a
  * directory that was replaced by a symlink out of the workspace, or removed, stops being served at once. */
 export function getProjectDir() {
@@ -147,7 +204,7 @@ export function getProjectDir() {
 
 export function getSettings() {
   const projectDir = getProjectDir();
-  const { llmProviders } = userState();
+  const llmProviders = userLlmProviders();
   return {
     projectDir,
     workspaceRoot: workspaceRoot(),
@@ -181,7 +238,9 @@ function applyCapabilityProvider(capability, value) {
       `"${value}" cannot be used for planAnalysis — the whole-feature plan-analysis call is deliberately Claude/hosted-model-only (see epic #96) and never delegated to a local model, even by explicit request.`,
     );
   }
-  userState().llmProviders[capability] = value;
+  const llmProviders = userLlmProviders();
+  llmProviders[capability] = value;
+  persistLlmProviders(llmProviders);
 }
 
 /** @throws {WorkspaceError} for a projectDir outside the workspace / missing / not a directory; Error for a bad provider. */

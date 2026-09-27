@@ -232,7 +232,7 @@ npm start
 |---|---|
 | `CONSTRUCT_GITHUB_CLIENT_ID` / `_SECRET` | the OAuth app. Setting one without the other refuses to start. |
 | `CONSTRUCT_ALLOWED_LOGINS` | comma- or space-separated GitHub logins, case-insensitive. **Required** whenever OAuth is configured — without it, "login with GitHub" would mean every GitHub account on earth. Anyone else authenticates with GitHub successfully and is still refused with `403`. |
-| `CONSTRUCT_SESSION_SECRET` | signs the session cookie, ≥16 chars. If unset, a random one is generated per process, so every restart signs everyone out. |
+| `CONSTRUCT_SESSION_SECRET` | signs the session cookie, ≥16 chars. If unset, one is generated once and persisted at `<stateDir>/session-secret` (mode 0600; refused if anyone else can read it), so sessions survive a restart from the same state directory — set this explicitly for full control over rotation (#418). |
 | `CONSTRUCT_SESSION_TTL_HOURS` | session lifetime, default `8`. Rolling: re-issued once past half its life. |
 | `CONSTRUCT_OAUTH_CALLBACK_URL` | defaults to `http://localhost:<PORT>/auth/callback`. Must match the OAuth app exactly. |
 | `CONSTRUCT_AUTH` | `required` forces the gate on with no OAuth app; `off` disables it, and is honoured **only** on loopback. |
