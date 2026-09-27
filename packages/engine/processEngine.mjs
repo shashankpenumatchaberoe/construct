@@ -237,9 +237,13 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, lan
     const collected = [];
     const logs = [];
 
-    let result;
+    // Everything from here through the commit shares one catch (#415): a
+    // throw from `transaction.commit()` (e.g. ENOSPC building the shadow
+    // copy) is an engine-level failure exactly like a throwing `executeStep`,
+    // and must fail the step the same way rather than escaping to
+    // `pump().catch` with the transaction left dangling.
     try {
-      result = await executeStep({
+      const result = await executeStep({
         process: working,
         step,
         status: stepStatus(working, step.id),
@@ -250,6 +254,63 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, lan
         log: (provenance, message, detail) => logs.push({ provenance, message, detail: detail ?? null }),
         artifact: (a) => collected.push(a),
       });
+      command.cleanup();
+
+      // Re-read rather than building on `working`: a pause or cancel may have
+      // arrived from an HTTP request while the step was in flight, and writing
+      // back a snapshot taken before it started would silently clobber it.
+      // (Caught by the "pause is cooperative" test, which went straight to
+      // `done` because the stale record still said `running.active`.)
+      let next = applyLogs(current(record.id), logs, step.id);
+
+      // Commit the step's staged writes, if it used the transaction. Nothing
+      // has touched the tree before this line.
+      const staged = transaction.pendingFiles();
+      if (result?.ok !== false && staged.length) {
+        const before = new Map(staged.map((rel) => [rel, readIfExists(path.join(record.projectRoot, rel))]));
+        const after = new Map(staged.map((rel) => [rel, transaction.readFile(rel)]));
+        const commit = transaction.commit(validate ? { validate } : undefined);
+        if (!commit.committed) {
+          next = failStep(next, step.id, {
+            llm: result?.llm ?? null,
+            error: `the step's changes did not validate, so nothing was written: ${commit.violations.length} violation(s)`,
+            now,
+          });
+          next = appendLog(next, {
+            provenance: 'warn',
+            message: `Step ${step.id} produced a tree that does not validate; ${staged.length} staged file(s) were discarded and the project is untouched.`,
+            stepId: step.id,
+            detail: commit.violations.slice(0, 20),
+            now,
+          });
+          return { record: persist(next), failed: true };
+        }
+        for (const rel of staged) {
+          collected.push({ path: rel, change: before.get(rel) === undefined ? 'create' : 'modify', before: before.get(rel), after: after.get(rel) });
+        }
+      } else if (staged.length) {
+        transaction.reset();
+      }
+
+      for (const a of [...collected, ...(result?.artifacts || [])]) {
+        next = recordArtifact(next, { ...a, stepId: a.stepId ?? step.id, now });
+      }
+
+      if (result?.ok === false) {
+        next = failStep(next, step.id, { llm: result.llm ?? null, error: result.error || 'step failed', now });
+        next = appendLog(next, { provenance: 'warn', message: `Step ${step.id} failed: ${result.error || 'no reason given'}.`, stepId: step.id, now });
+        return { record: persist(next), failed: true };
+      }
+
+      next = completeStep(next, step.id, { llm: result?.llm ?? null, now });
+      next = appendLog(next, {
+        provenance: result?.llm ? 'llm' : 'ok',
+        message: `Step ${step.id} finished: ${step.title}.${result?.llm ? ` Model: ${result.llm.provider ?? 'unknown'} (${result.llm.calls ?? 0} call(s)) — review before trusting it.` : ''}`,
+        stepId: step.id,
+        now,
+      });
+      const settled = applyEvent(next, 'STEP_COMPLETED', { now });
+      return { record: persist(settled.accepted ? settled.process : next) };
     } catch (e) {
       command.cleanup();
       transaction.reset();
@@ -261,63 +322,6 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, lan
       next = appendLog(next, { provenance: 'warn', message: `Step ${step.id} threw: ${e.message}`, stepId: step.id, now });
       return { record: persist(next), failed: true };
     }
-    command.cleanup();
-
-    // Re-read rather than building on `working`: a pause or cancel may have
-    // arrived from an HTTP request while the step was in flight, and writing
-    // back a snapshot taken before it started would silently clobber it.
-    // (Caught by the "pause is cooperative" test, which went straight to
-    // `done` because the stale record still said `running.active`.)
-    let next = applyLogs(current(record.id), logs, step.id);
-
-    // Commit the step's staged writes, if it used the transaction. Nothing
-    // has touched the tree before this line.
-    const staged = transaction.pendingFiles();
-    if (result?.ok !== false && staged.length) {
-      const before = new Map(staged.map((rel) => [rel, readIfExists(path.join(record.projectRoot, rel))]));
-      const after = new Map(staged.map((rel) => [rel, transaction.readFile(rel)]));
-      const commit = transaction.commit(validate ? { validate } : undefined);
-      if (!commit.committed) {
-        next = failStep(next, step.id, {
-          llm: result?.llm ?? null,
-          error: `the step's changes did not validate, so nothing was written: ${commit.violations.length} violation(s)`,
-          now,
-        });
-        next = appendLog(next, {
-          provenance: 'warn',
-          message: `Step ${step.id} produced a tree that does not validate; ${staged.length} staged file(s) were discarded and the project is untouched.`,
-          stepId: step.id,
-          detail: commit.violations.slice(0, 20),
-          now,
-        });
-        return { record: persist(next), failed: true };
-      }
-      for (const rel of staged) {
-        collected.push({ path: rel, change: before.get(rel) === undefined ? 'create' : 'modify', before: before.get(rel), after: after.get(rel) });
-      }
-    } else if (staged.length) {
-      transaction.reset();
-    }
-
-    for (const a of [...collected, ...(result?.artifacts || [])]) {
-      next = recordArtifact(next, { ...a, stepId: a.stepId ?? step.id, now });
-    }
-
-    if (result?.ok === false) {
-      next = failStep(next, step.id, { llm: result.llm ?? null, error: result.error || 'step failed', now });
-      next = appendLog(next, { provenance: 'warn', message: `Step ${step.id} failed: ${result.error || 'no reason given'}.`, stepId: step.id, now });
-      return { record: persist(next), failed: true };
-    }
-
-    next = completeStep(next, step.id, { llm: result?.llm ?? null, now });
-    next = appendLog(next, {
-      provenance: result?.llm ? 'llm' : 'ok',
-      message: `Step ${step.id} finished: ${step.title}.${result?.llm ? ` Model: ${result.llm.provider ?? 'unknown'} (${result.llm.calls ?? 0} call(s)) — review before trusting it.` : ''}`,
-      stepId: step.id,
-      now,
-    });
-    const settled = applyEvent(next, 'STEP_COMPLETED', { now });
-    return { record: persist(settled.accepted ? settled.process : next) };
   }
 
   function applyLogs(record, logs, stepId) {
@@ -417,13 +421,28 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, lan
     }
     holder.promise = loop(id)
       .catch((e) => {
-        // An engine-level failure (a broken store, a bug here) is recorded
-        // on the process rather than swallowed: a process that stopped for
-        // an unknown reason is worse than one that says why.
+        // An engine-level failure (a full disk, an unwritable state dir, a
+        // bug here) used to just log a line and leave `state` untouched —
+        // which left the record saying `running`, with a live owner pid,
+        // forever (#415). Apply a real STEP_FAILED instead, the same event
+        // a step's own failure sends, so the process actually stops.
+        let record;
         try {
-          const record = current(id);
-          persist(appendLog({ ...record, error: e.message }, { provenance: 'warn', message: `The process runtime stopped this process: ${e.message}`, now }));
-        } catch { /* the store itself is gone; nothing useful left to do */ }
+          record = current(id);
+        } catch { return null; } // the store itself is gone; nothing useful left to do
+        const message = `The process runtime stopped this process: ${e.message}`;
+        const failed = applyEvent({ ...record, error: e.message }, 'STEP_FAILED', { now, message });
+        const patched = failed.accepted ? failed.process : { ...record, error: e.message };
+        try {
+          persist(patched);
+        } catch {
+          // The store would not even take the failure — plausibly the same
+          // full disk that caused the original error. Nothing on disk, but
+          // at least tell anyone watching live so the socket does not sit
+          // on a stale "running" (the best-effort record is `patched`,
+          // already carrying the failure message and log entry).
+          if (onChange) onChange(patched);
+        }
         return null;
       })
       .finally(() => {

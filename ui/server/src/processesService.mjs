@@ -116,8 +116,27 @@ function blockRefusal(getBlockSettings, root, plan) {
  * @param {(root: string) => {flows: string[], unreadable?: string|null}} [options.getBlockSettings] #611: the blocks turned
  *   off for a project (Features, Blocks tab), read fresh on every start. `startPlan` refuses a plan that uses one, so the
  *   Git screen's Review analysis and the Tests screen's run, which start their own plans, cannot forget the check.
+ * @param {number} [options.adoptIntervalMs] #415: how often every open project's `adoptInterrupted()` re-runs, not
+ *   only at server start. A killed server is caught at the next `open()`, but a server that is merely wedged
+ *   (an engine-level failure whose own record could not be saved, a store gone unwritable) needs the same
+ *   liveness check to run again without a restart. `0` disables the timer (tests that don't care).
+ * @param {typeof setInterval} [options.setIntervalFn] test seam.
+ * @param {typeof clearInterval} [options.clearIntervalFn] test seam.
+ * @param {(pid: number) => boolean} [options.isAlive] forwarded to every `adoptInterrupted()` call (start-up and
+ *   timer alike); test seam so a test can fake a dead pid deterministically instead of racing a real one.
  */
-export function createProcessesService({ getProjectDir, stateDir = resolveStateDir(), executeStep = null, reviewExecutor = null, testRunExecutor = null, getBlockSettings = null } = {}) {
+export function createProcessesService({
+  getProjectDir,
+  stateDir = resolveStateDir(),
+  executeStep = null,
+  reviewExecutor = null,
+  testRunExecutor = null,
+  getBlockSettings = null,
+  adoptIntervalMs = 5 * 60 * 1000,
+  setIntervalFn = setInterval,
+  clearIntervalFn = clearInterval,
+  isAlive = null,
+} = {}) {
   /** project root -> { store, engine, root } */
   const projects = new Map();
   const listeners = new Set();
@@ -129,6 +148,19 @@ export function createProcessesService({ getProjectDir, stateDir = resolveStateD
       try { fn(record); } catch { /* one bad listener must not stop the engine */ }
     }
   };
+
+  /** Re-run `adoptInterrupted()` on every project already opened this server
+   * run. `open()` only checks once, the moment a project is first touched
+   * (the comment there says so); this is the same check run again, later,
+   * for a server that is still up but wedged rather than killed (#415). */
+  function reAdoptAll() {
+    for (const entry of projects.values()) {
+      for (const record of entry.store.adoptInterrupted(isAlive ? { isAlive } : undefined)) emit(record);
+    }
+  }
+
+  const adoptTimer = adoptIntervalMs > 0 ? setIntervalFn(reAdoptAll, adoptIntervalMs) : null;
+  adoptTimer?.unref?.();
 
   const engineOptions = () => {
     if (executor) return { executeStep: executor };
@@ -154,8 +186,9 @@ export function createProcessesService({ getProjectDir, stateDir = resolveStateD
     if (!entry) {
       const store = openProcessStore(root, { stateDir });
       // A record left `running` by a server that was killed is not running;
-      // pause it so it can be resumed. Once per project per server start.
-      store.adoptInterrupted();
+      // pause it so it can be resumed. Once per project per server start
+      // (the timer below, #415, is what covers a wedge found later).
+      store.adoptInterrupted(isAlive ? { isAlive } : undefined);
       const engine = createProcessEngine({ store, ...engineOptions(), onChange: emit });
       // The approval gate (#337) is the only writer of a bot's output into the tree; the service
       // only hands it what the router derived (see decide() below).
@@ -177,6 +210,12 @@ export function createProcessesService({ getProjectDir, stateDir = resolveStateD
     setExecutor(fn) { executor = fn; projects.clear(); },
     currentRoot: () => open()?.root ?? null,
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    /** #415: fire the periodic re-adoption check right now, instead of waiting `adoptIntervalMs` — what the
+     * timer does on its own schedule, exposed so a test (or an admin action) can trigger it deterministically. */
+    reAdoptInterrupted: reAdoptAll,
+    /** Stop the periodic re-adoption timer. Harmless to skip (it's `unref()`d and does not block process
+     * exit), but a test that creates many services in a loop, or a graceful shutdown, can call it to be tidy. */
+    close() { if (adoptTimer) clearIntervalFn(adoptTimer); },
     /** The engine for the current project, for a harness that has to start work. */
     engine: () => open()?.engine ?? null,
     store: () => open()?.store ?? null,
