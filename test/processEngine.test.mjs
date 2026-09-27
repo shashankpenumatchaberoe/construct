@@ -427,6 +427,122 @@ test('maxConcurrent serialises processes: the second waits for the first', async
   assert.equal(store.load('b').state, 'done');
 });
 
+test('#417: an analysis (read lane) starts and finishes while a plan (write lane) is running, rather than queuing behind it', async () => {
+  const projectRoot = makeTempDir('construct-lanes-project-');
+  const stateDir = makeTempDir('construct-lanes-state-');
+  fs.mkdirSync(path.join(projectRoot, 'features', 'checkout'), { recursive: true });
+  const now = fakeClock();
+  const store = openProcessStore(projectRoot, { stateDir, now });
+
+  const plan = {
+    version: 1,
+    ticket: { source: 'text', title: 'A bot plan' },
+    steps: [{ id: 'feature', title: 'Create it', flow: 'create.feature', args: { name: 'checkout' }, executor: 'deterministic', touches: touching(FILE_FOR.feature) }],
+  };
+  // Shaped exactly like reviewAnalyses.mjs's real analysisPlan(): one step, flow `review.analyze`, no `touches`.
+  const analysis = {
+    version: 1,
+    ticket: { source: 'text', title: 'Review analysis' },
+    steps: [{ id: 'analyse', title: 'Analyse', flow: 'review.analyze', executor: 'deterministic', args: { base: 'a'.repeat(40), head: 'b'.repeat(40) } }],
+  };
+  store.save(createProcess(plan, { id: 'plan', projectRoot, now }));
+  store.save(createProcess(analysis, { id: 'analysis', projectRoot, now }));
+
+  let releasePlan;
+  const blocked = new Promise((resolve) => { releasePlan = resolve; });
+  let analysisRan = false;
+
+  // Mirrors `laneOf` in ui/server/src/processesService.mjs: every step `review.analyze`/`test.run` -> read, else write.
+  const laneOf = (record) => (record.steps.every((s) => s.flow === 'review.analyze' || s.flow === 'test.run') ? 'read' : 'write');
+
+  const engine = createProcessEngine({
+    store,
+    now,
+    validate: () => ({ violations: [], ok: true }),
+    lanes: { write: 1, read: 1 },
+    laneOf,
+    executeStep: async ({ step, transaction }) => {
+      if (step.flow === 'review.analyze') {
+        analysisRan = true;
+        return { ok: true, llm: null, artifacts: [] };
+      }
+      transaction.writeFile(FILE_FOR.feature, '// plan\n');
+      await blocked; // the write-lane step hangs until the test releases it
+      return { ok: true, llm: null };
+    },
+  });
+
+  engine.start('plan');
+  await new Promise((r) => setTimeout(r, 15)); // let the plan's step actually start (and hang)
+
+  engine.start('analysis');
+  const doneAnalysis = await engine.settled('analysis');
+
+  assert.equal(analysisRan, true, 'the analysis step ran');
+  assert.equal(doneAnalysis.state, 'done', 'the analysis finished without waiting for the write-lane plan');
+  assert.equal(store.load('plan').state, 'running.active', 'the plan is still mid-step: the analysis neither waited for it nor interrupted it');
+
+  releasePlan();
+  const donePlan = await engine.settled('plan');
+  assert.equal(donePlan.state, 'done');
+});
+
+test('#417: the box-wide write-lane semaphore stops two projects from running two bots at the same time', async () => {
+  const prevEnv = process.env.CONSTRUCT_BOT_CONCURRENCY;
+  process.env.CONSTRUCT_BOT_CONCURRENCY = '1';
+  try {
+    const laneOf = () => 'write'; // every step in this test is a bot plan
+    const onePlan = (title) => ({
+      version: 1,
+      ticket: { source: 'text', title },
+      steps: [{ id: 'feature', title: 'Create it', flow: 'create.feature', args: { name: 'checkout' }, executor: 'deterministic', touches: touching(FILE_FOR.feature) }],
+    });
+
+    let concurrent = 0;
+    let peak = 0;
+    const executeStep = async ({ step, transaction }) => {
+      concurrent += 1;
+      peak = Math.max(peak, concurrent);
+      transaction.writeFile(FILE_FOR[step.id], `// ${step.id}\n`);
+      await new Promise((r) => setTimeout(r, 20));
+      concurrent -= 1;
+      return { ok: true, llm: null };
+    };
+
+    function projectEngine(label) {
+      const projectRoot = makeTempDir(`construct-lanes-global-${label}-`);
+      const stateDir = makeTempDir(`construct-lanes-global-${label}-state-`);
+      fs.mkdirSync(path.join(projectRoot, 'features', 'checkout'), { recursive: true });
+      const now = fakeClock();
+      const store = openProcessStore(projectRoot, { stateDir, now });
+      store.save(createProcess(onePlan(`project ${label}`), { id: 'bot', projectRoot, now }));
+      const engine = createProcessEngine({
+        store,
+        now,
+        executeStep,
+        validate: () => ({ violations: [], ok: true }),
+        lanes: { write: 1, read: 1 }, // each project's OWN cap already allows only 1 — the point of this test is the cap ACROSS projects
+        laneOf,
+      });
+      return { engine, store };
+    }
+
+    const a = projectEngine('a');
+    const b = projectEngine('b');
+
+    a.engine.start('bot');
+    b.engine.start('bot');
+    await Promise.all([a.engine.settled('bot'), b.engine.settled('bot')]);
+
+    assert.equal(peak, 1, 'two engines for two different projects must not run a write-lane bot at the same time when the global cap is 1');
+    assert.equal(a.store.load('bot').state, 'done');
+    assert.equal(b.store.load('bot').state, 'done');
+  } finally {
+    if (prevEnv === undefined) delete process.env.CONSTRUCT_BOT_CONCURRENCY;
+    else process.env.CONSTRUCT_BOT_CONCURRENCY = prevEnv;
+  }
+});
+
 test('materializeCommand turns an import.plan step into a real runnable command with its plan on disk', () => {
   const step = {
     id: 'import',

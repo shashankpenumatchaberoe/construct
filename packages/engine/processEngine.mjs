@@ -66,6 +66,20 @@ export class StepAborted extends Error {
 
 const defaultNow = () => new Date().toISOString();
 
+// #417 — a box-wide cap on the WRITE lane, shared by every engine in this process no matter how many
+// projects are open. Read-only work (`review.analyze`, `test.run`) never touches this: it was queuing
+// for minutes behind a running bot plan in the SAME engine, which lanes fix per project; this fixes the
+// other half — N open projects each getting their own engine meant N concurrent bots on one 15 GB box.
+// Deliberately module-level rather than an option threaded through every call site, and read fresh
+// (never cached) so it reacts to `CONSTRUCT_BOT_CONCURRENCY` the same way `botRunner.mjs`'s own
+// `resolveMaxConcurrent()` does, and so a test can flip it between cases without restarting anything.
+const globalWriteLane = { active: 0, pumps: new Set() };
+
+function globalWriteLimit(env = process.env) {
+  const n = Number.parseInt(env.CONSTRUCT_BOT_CONCURRENCY, 10);
+  return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
 /**
  * `planToCommand()` for a step, with the `files` placeholders already
  * materialised into real temp files — the concrete example the mantra asks
@@ -116,22 +130,46 @@ export function materializeCommand(step, { tmpDir } = {}) {
  * @param {(context: any) => Promise<any>} [options.executeStep] `async ({ process, step, status, command, transaction, projectRoot, log, signal }) => { ok, llm, artifacts?, error? }`
  *                                         — #291 supplies this. `llm` is required in the result:
  *                                         `null` for "no model was involved", `{ provider, calls }` otherwise.
- * @param {number} [options.maxConcurrent] processes running at once. Default 1.
+ * @param {number} [options.maxConcurrent] processes running at once when `lanes` is not given. Default 1.
+ * @param {{read?: number, write?: number}} [options.lanes] #417: split the one slot queue into two —
+ *                                         `read` for `review.analyze`/`test.run` (never blocked by a
+ *                                         running bot plan) and `write` for everything else (bot plans;
+ *                                         parallel writers in one tree still collide, so this stays 1
+ *                                         unless told otherwise). Omit `lanes` to keep the single-queue
+ *                                         behaviour keyed by `maxConcurrent` exactly as before. The write
+ *                                         lane is ALSO capped box-wide (`CONSTRUCT_BOT_CONCURRENCY`,
+ *                                         module-level, shared by every engine in this process) so N open
+ *                                         projects cannot mean N concurrent bots.
+ * @param {(record: any) => 'read'|'write'} [options.laneOf] required with `lanes`: which lane a queued
+ *                                         process belongs in, decided from its own record (e.g. its
+ *                                         steps' `flow`). Anything not recognised falls back to `write`,
+ *                                         the more conservative lane.
  * @param {(record: any) => void} [options.onChange] called with every persisted process record — the seam #292's
  *                                         WebSocket streams from, so the engine needs no socket of its own.
  * @param {ValidateFn} [options.validate] passed to `transaction.commit()`; defaults to the writer's own
  *                                         `validateArchitecture`.
  * @param {() => string} [options.now]    clock, injected for deterministic tests.
  */
-export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onChange = null, validate, now = defaultNow } = {}) {
+export function createProcessEngine({ store, executeStep, maxConcurrent = 1, lanes = null, laneOf = null, onChange = null, validate, now = defaultNow } = {}) {
   if (!store) throw new TypeError('createProcessEngine() needs a store (see openProcessStore()).');
   if (typeof executeStep !== 'function') {
     throw new TypeError('createProcessEngine() needs an executeStep function — running a step is the runner\'s job (#291), not the runtime model\'s.');
   }
 
+  // Lane caps, only when `lanes` is given — this is what keeps every existing single-queue caller
+  // (this file's own `maxConcurrent` tests, any executeStep swap that never passes `lanes`) byte-for-byte
+  // unchanged: no lanes object, no lane bookkeeping, no global semaphore involvement at all.
+  const laneCaps = lanes ? {
+    read: Number.isInteger(lanes.read) && lanes.read >= 1 ? lanes.read : 1,
+    write: Number.isInteger(lanes.write) && lanes.write >= 1 ? lanes.write : 1,
+  } : null;
+  const laneOfRecord = (record) => (laneOf && laneOf(record) === 'read' ? 'read' : 'write');
+
   /** id -> { promise, abort, settled } for processes this engine is driving. */
   const running = new Map();
-  const waiting = [];
+  const waiting = []; // legacy single-queue path (no `lanes`)
+  const laneWaiting = laneCaps ? { read: [], write: [] } : null;
+  const laneRunning = laneCaps ? { read: 0, write: 0 } : null;
 
   const persist = (record) => {
     const saved = store.save(record);
@@ -340,29 +378,86 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
     return next;
   }
 
-  function pump() {
-    while (running.size < maxConcurrent && waiting.length) {
-      const id = waiting.shift();
-      const controller = new AbortController();
-      const holder = { controller };
-      running.set(id, holder);
-      holder.promise = loop(id)
-        .catch((e) => {
-          // An engine-level failure (a broken store, a bug here) is recorded
-          // on the process rather than swallowed: a process that stopped for
-          // an unknown reason is worse than one that says why.
-          try {
-            const record = current(id);
-            persist(appendLog({ ...record, error: e.message }, { provenance: 'warn', message: `The process runtime stopped this process: ${e.message}`, now }));
-          } catch { /* the store itself is gone; nothing useful left to do */ }
-          return null;
-        })
-        .finally(() => {
-          running.delete(id);
-          pump();
-        });
+  /** Queue `id` to run, unless it is already running or already queued. Picks its lane (when this
+   * engine has lanes) from `record` — the freshly-persisted process, never a stale caller copy. */
+  function enqueue(id, record) {
+    if (running.has(id)) return;
+    if (laneCaps) {
+      const lane = laneOfRecord(record);
+      if (!laneWaiting[lane].includes(id)) laneWaiting[lane].push(id);
+    } else if (!waiting.includes(id)) {
+      waiting.push(id);
     }
   }
+
+  /** Remove `id` from whichever queue it is sitting in (used by cancel). Returns whether it was found. */
+  function dequeue(id) {
+    const i = waiting.indexOf(id);
+    if (i >= 0) { waiting.splice(i, 1); return true; }
+    if (laneCaps) {
+      for (const lane of ['read', 'write']) {
+        const j = laneWaiting[lane].indexOf(id);
+        if (j >= 0) { laneWaiting[lane].splice(j, 1); return true; }
+      }
+    }
+    return false;
+  }
+
+  function isQueued(id) {
+    return waiting.includes(id) || (laneCaps ? laneWaiting.read.includes(id) || laneWaiting.write.includes(id) : false);
+  }
+
+  function launch(id, lane) {
+    const controller = new AbortController();
+    const holder = { controller, lane };
+    running.set(id, holder);
+    if (laneCaps) {
+      laneRunning[lane] += 1;
+      if (lane === 'write') globalWriteLane.active += 1;
+    }
+    holder.promise = loop(id)
+      .catch((e) => {
+        // An engine-level failure (a broken store, a bug here) is recorded
+        // on the process rather than swallowed: a process that stopped for
+        // an unknown reason is worse than one that says why.
+        try {
+          const record = current(id);
+          persist(appendLog({ ...record, error: e.message }, { provenance: 'warn', message: `The process runtime stopped this process: ${e.message}`, now }));
+        } catch { /* the store itself is gone; nothing useful left to do */ }
+        return null;
+      })
+      .finally(() => {
+        running.delete(id);
+        if (laneCaps) {
+          laneRunning[lane] -= 1;
+          if (lane === 'write') {
+            globalWriteLane.active -= 1;
+            // A box-wide write slot just freed up: give every engine's queue (not only this one's) a
+            // chance to claim it — that is the whole point of the semaphore being shared, not per-engine.
+            for (const otherPump of globalWriteLane.pumps) otherPump();
+            return; // this engine's own pump is IN globalWriteLane.pumps, so the loop above just called it too
+          }
+        }
+        pump();
+      });
+  }
+
+  function pump() {
+    if (!laneCaps) {
+      while (running.size < maxConcurrent && waiting.length) launch(waiting.shift(), null);
+      return;
+    }
+    for (const lane of ['read', 'write']) {
+      while (
+        laneRunning[lane] < laneCaps[lane]
+        && (lane !== 'write' || globalWriteLane.active < globalWriteLimit())
+        && laneWaiting[lane].length
+      ) {
+        launch(laneWaiting[lane].shift(), lane);
+      }
+    }
+  }
+  if (laneCaps) globalWriteLane.pumps.add(pump);
 
   const engine = {
     store,
@@ -379,7 +474,7 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
     start(id) {
       const started = send(id, 'START', { message: 'Process started.' });
       if (!started.accepted) return started;
-      if (!running.has(id) && !waiting.includes(id)) waiting.push(id);
+      enqueue(id, started.process);
       pump();
       return started;
     },
@@ -398,7 +493,7 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
     resume(id) {
       const resumed = send(id, 'RESUME', { message: 'Resumed.' });
       if (!resumed.accepted) return resumed;
-      if (!running.has(id) && !waiting.includes(id)) waiting.push(id);
+      enqueue(id, resumed.process);
       pump();
       return resumed;
     },
@@ -426,8 +521,7 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
         const settled = yielded.accepted ? yielded.process : asked.process;
         return { process: persist(skipRemaining(settled, 'the process was cancelled')), accepted: true, error: null };
       }
-      const index = waiting.indexOf(id);
-      if (index >= 0) waiting.splice(index, 1);
+      dequeue(id);
       void record;
       return { ...asked, process: persist(skipRemaining(asked.process, 'the process was cancelled')) };
     },
@@ -445,7 +539,7 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
       const retried = applyEvent(saved, 'RETRY', { now, message: 'Retrying from the step that failed.' });
       if (!retried.accepted) return retried;
       const out = persist(retried.process);
-      if (!running.has(id) && !waiting.includes(id)) waiting.push(id);
+      enqueue(id, out);
       pump();
       return { process: out, accepted: true, error: null };
     },
@@ -456,7 +550,7 @@ export function createProcessEngine({ store, executeStep, maxConcurrent = 1, onC
       for (let i = 0; i < 10000; i += 1) {
         const holder = running.get(id);
         if (!holder) {
-          if (!waiting.includes(id)) return current(id);
+          if (!isQueued(id)) return current(id);
           await new Promise((r) => setImmediate(r));
           continue;
         }
