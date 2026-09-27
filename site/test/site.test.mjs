@@ -6,6 +6,7 @@ import { slugify, makeSlugger, esc } from '../../packages/docs-site/lib/text.mjs
 import { sanitizeHtml } from '../../packages/docs-site/lib/sanitize.mjs';
 import { build, parseArgs, devStatus } from '../build.mjs';
 import { USER_GROUPS, EXAMPLE_SURFACES, examplePages } from '../../packages/docs-site/lib/structure.mjs';
+import { API_PACKAGES } from '../../packages/docs-site/lib/apiDocs.mjs';
 import { makeTempDir } from '../../test-utils/tmpdir.mjs';
 
 const BUILD_TIME = new Date('2026-09-20T00:00:00Z');
@@ -228,6 +229,19 @@ test('markdown helpers: sections, includes, ticket stripping', async () => {
   assert.equal(relevel('## A\n\n### C\n', 3, true), '\n### C\n'.replace('\n### C', '\n#### C'));
   assert.equal(stripTicketRefs('Title (#96, the epic) and more (Epic 6.4/#100) end. Tracked under issue #104.'), 'Title and more end.');
   assert.doesNotMatch(stripTicketRefsHtml('<table><tr><th>#</th><th>Story</th></tr><tr><td>#128</td><td>x</td></tr></table>'), /#128/);
+  // A bare ticket number after a sentence break, with no defining phrase around it at all (the case #479 found:
+  // a source comment reading "#77 follow-up to #53").
+  assert.doesNotMatch(stripTicketRefs('#77 follow-up to #53'), /#\d+/);
+  assert.doesNotMatch(stripTicketRefs('Fixed the retry loop. #620 adds a timeout; #626 adds a cap.'), /#\d+/);
+  // Real shapes this codebase's own source comments use: a "/"-joined pair, a version/ticket pair, a
+  // hyphenated ref, and one quoted in prose -- all bare, none of the phrasings the earlier rules already catch.
+  assert.doesNotMatch(stripTicketRefs("mirroring #527/#532's own read/write split"), /#\d+/);
+  assert.doesNotMatch(stripTicketRefs('Remove tracker plumbing ("(#96)", "Epic 6.4/#100", "Tracked under issue #104").'), /#\d+/);
+  assert.doesNotMatch(stripTicketRefs('Byte-for-byte the pre-#334 behaviour.'), /#\d+/);
+  // Not a ticket ref: CSS hex colors, a heading anchor, and a URL fragment survive untouched.
+  assert.equal(stripTicketRefs('Use color #fff for the background, or #a1b2c3 for the border.'), 'Use color #fff for the background, or #a1b2c3 for the border.');
+  assert.equal(stripTicketRefs('See the #some-heading section.'), 'See the #some-heading section.');
+  assert.equal(stripTicketRefs('Visit https://example.com/page#42 for details.'), 'Visit https://example.com/page#42 for details.');
 });
 
 test('friendliness: three-item nav, product side menu, where-am-I line, quickstart first, plain words', async () => {
@@ -274,6 +288,25 @@ test('API reference: core, engine and AST are generated from source, versioned, 
   assert.ok(!fs.existsSync(path.join(plain, 'developers/api')));
   fs.rmSync(out, { recursive: true });
   fs.rmSync(plain, { recursive: true });
+});
+
+test('API reference: no leaked internal ticket number on any generated page of any of the 8 API-doc packages', async () => {
+  const out = makeTempDir('site-api-allpkgs-test-');
+  await build({ out, repo: 'o/r', buildTime: BUILD_TIME, version: '0.9', api: true });
+  const apiRoot = path.join(out, 'developers/api');
+  assert.ok(fs.existsSync(apiRoot));
+  // Every one of the 8 API_PACKAGES writes its own directory (each has at least one documentable module in
+  // this repo); a package silently missing from the build would otherwise go unchecked below.
+  for (const pkg of API_PACKAGES) assert.ok(fs.existsSync(path.join(apiRoot, pkg.id)), `no output for package "${pkg.id}"`);
+  let checked = 0;
+  for (const f of walk(apiRoot).filter((x) => x.endsWith('.html'))) {
+    const html = fs.readFileSync(f, 'utf8');
+    const text = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/&#\d+;/g, "'").replace(/<[^>]+>/g, ' ');
+    assert.doesNotMatch(text, /#\d{2,4}\b/, `ticket number leaked in ${path.relative(out, f)}`);
+    checked++;
+  }
+  assert.ok(checked > API_PACKAGES.length, 'more than one page per package was actually checked');
+  fs.rmSync(out, { recursive: true });
 });
 
 test('API reference: Cockpit server REST reference and CLI command reference are wired into the versioned build', async () => {

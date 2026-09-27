@@ -92,7 +92,20 @@ export function stripTicketRefs(md) {
   return md
     .replace(/\s*\((?:see |Part of |Tickets? |Ticket )?(?:#\d+|Epic \d)[^)]*\)/g, '')
     .replace(/\s*Tracked under issue #\d+\.?/g, '')
-    .replace(/ #\d{2,4}\b/g, (m, off, s) => (/(?:issue|ticket|PR)s?\s*$/i.test(s.slice(0, off)) ? '' : m));
+    .replace(/ #\d{2,4}\b/g, (m, off, s) => (/(?:issue|ticket|PR)s?\s*$/i.test(s.slice(0, off)) ? '' : m))
+    // A bare ticket number (or a "/" or ","-joined chain of them, e.g. "#527/#532", "#667/#668", "Epic 6.4/#100",
+    // a common shorthand in this codebase's own source comments) with no defining phrase around it at all, e.g.
+    // after a sentence break ("#77 follow-up to #53"), at the very start of a comment ("#631 (part of #616)
+    // -- ...", "#533 (Slice 3 of #518's design) ..."), hyphenated onto a word ("the pre-#334 behaviour"), or
+    // quoted in prose ("tables of \"#128\" cells"). The leading "#" of the chain must be preceded by whitespace,
+    // "/", "," or "-" (so a ref glued onto another ref, a version number or a word is still caught), an opening
+    // quote/bracket/paren, or be the first character, and the digits it ends on must be followed by a word
+    // boundary that isn't itself a hyphen or letter -- so this never touches a CSS hex color (`#fff`,
+    // `#a1b2c3`: the character right after `#` there is a letter, not a digit, so `\d+` never starts matching),
+    // a heading anchor (`#some-heading`, same reason; `#2026-roadmap` is blocked by the trailing lookahead), or
+    // a URL fragment glued directly onto a path/word with no separating space/slash/hyphen/comma
+    // (`page.html#42`, whose `#` is preceded by a letter).
+    .replace(/(^|[\s"'([/,-])#\d+(?:[/,]#\d+)*(?![-\w])/g, (_, pre) => pre);
 }
 
 /** Drop tracker numbers from already-rendered guide HTML (tables of "#128" cells, "Part of #127" lines). */
