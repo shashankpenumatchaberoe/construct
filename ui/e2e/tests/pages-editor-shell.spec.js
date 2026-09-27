@@ -62,7 +62,9 @@ test.describe.serial('Pages Editor inside the shell (#247)', () => {
     const main = page.getByRole('main');
 
     // Arrangement: Pages tab (first) holds the picker and the JSX tree; the stage holds the previews.
-    await expect(browser.getByRole('tablist').getByRole('tab').first()).toHaveText('Pages');
+    // #683's rail merge moved this tablist out of the complementary "Browser" landmark into a
+    // standalone sibling tablist of the same name (see #706) -- query it from `page`, not `browser`.
+    await expect(page.getByRole('tablist', { name: 'Browser' }).getByRole('tab').first()).toHaveText('Pages');
     await expect(browser.locator('.pages-browser')).toBeVisible();
     await expect(browser.locator('.tree-panel')).toBeVisible();
     await expect(main.locator('.tree-panel')).toHaveCount(0);
