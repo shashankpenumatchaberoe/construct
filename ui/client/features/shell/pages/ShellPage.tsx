@@ -19,10 +19,13 @@ export function ShellPage(props: ShellPageProps): ReactNode {
       activeId={activeTabs[region]}
       onSelect={(id) => onSelectTab(region, id)}
       empty={region === 'browser' ? <EmptyPanel title="Nothing to browse on this screen" hint="Choose Features, Pages, Components, Git or Tests in the menu on the left; Settings, Local model and Help are in the profile menu." /> : undefined}
-      // #683: the Browser pane's own sub-tabs (Features/Notes, ...) no longer render as this
-      // host's horizontal tablist -- they render as vertical entries under the rail instead
-      // (below), so this pane keeps only the active tab's content.
-      hideList={region === 'browser'}
+      // #683: in the wide layout, the Browser pane's own sub-tabs (Features/Notes, ...) no
+      // longer render as this host's horizontal tablist -- they render as vertical entries
+      // under the rail instead (below), so this pane keeps only the active tab's content.
+      // #712: narrow layout has no rail column to merge into (the rail renders separately,
+      // as a horizontal screens bar, see ShellLayout's narrow branch), so it keeps the
+      // pre-#683 behavior of TabHost rendering its own horizontal tablist here.
+      hideList={region === 'browser' && !props.narrow}
     />
   );
   // Only in the wide layout, and only while the Browser pane is open: the narrow layout already
