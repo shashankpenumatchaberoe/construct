@@ -236,6 +236,14 @@ export const result = compileChain([feature, unit], { 'app.feature': 'cart', 'ap
           ],
           "files": [
             {
+              "path": "features/cart/types.ts",
+              "change": "create"
+            },
+            {
+              "path": "features/cart/index.ts",
+              "change": "create"
+            },
+            {
               "path": "features/cart/domain/CartRules.tsx",
               "change": "create",
               "layer": "domain"

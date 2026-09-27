@@ -19,7 +19,7 @@ import { ts, printNode as print } from '../../packages/ast/index.mjs';
 import { loadConfig } from '../core/config.mjs';
 import fs from 'node:fs';
 import { write } from '../core/fs.mjs';
-import { selfCheck, pascalCase } from '../core/generators.mjs';
+import { selfCheck, pascalCase, ensureFeatureExists } from '../core/generators.mjs';
 import { ConstructError, EXIT_CODES } from '../core/diagnostics.mjs';
 
 // A lazy view of `ts.factory`: reading it at import time would load the compiler for every importer (#657).
@@ -396,6 +396,7 @@ export function generateWorkflow(root, name, feature, descriptor, { stateUnion =
   const cap = pascalCase(name, 'Workflow');
   const { source, events, contextFields } = compileWorkflow(descriptor, { name: cap });
 
+  ensureFeatureExists(root, feature); // #677: a missing feature is scaffolded first, not silently written into
   const dir = path.join(root, config.features?.root || 'features', feature, 'workflows');
   const file = path.join(dir, `${cap}Workflow.tsx`);
   if (!stateUnion) {

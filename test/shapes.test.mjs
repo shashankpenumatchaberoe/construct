@@ -15,6 +15,7 @@ import { parseRequirement } from '../packages/core/requirement-card.mjs';
 import { placeCard, planFromBlocks, blockSummary, SHAPE_OPTIONS, SHAPE_QUESTION_ID } from '../packages/core/placement.mjs';
 import { suggest } from '../packages/core/decision-provider.mjs';
 import { SHAPES, endpointOf, fieldsFromProperties, generateShapeLayer, generateShapeVertical, parseFields, shapeContext, shapeFiles, shapeTouches, singularOf } from '../packages/core/shapes.mjs';
+import { validateSeparationOfConcerns } from '../packages/core/soc-enforcer.mjs';
 import { makeTempDir } from '../test-utils/tmpdir.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,36 @@ test('a required layer that already exists satisfies a smaller request', () => {
   generateShapeVertical(dir, REQUEST, ['domain', 'service', 'hook', 'component']);
   assert.deepEqual(generateShapeLayer(dir, { ...REQUEST, layer: 'page' }).map((f) => path.basename(f)), ['ProductsPage.page.tsx', 'ProductsByStatus.expression.tsx']);
   assert.deepEqual(generateShapeLayer(dir, { ...REQUEST, layer: 'controller' }).map((f) => path.basename(f)), ['ProductsController.controller.tsx']);
+});
+
+// #677 -- the exact repro of the issue: `construct create layer <Name> --feature <missing> --shape list ...`
+// used to write 11 files and exit 0 into a feature that was never scaffolded (no index.ts/types.ts, and no
+// folder for a layer left out of --layers), so `construct validate` failed later with an unrelated-looking
+// SLICE-001. The feature is now created first, same as `construct create feature` would.
+test('#677: create layer --shape into a missing feature scaffolds the feature first, so it passes validate', () => {
+  const dir = makeTempDir('construct-shape-missing-feature-');
+  assert.equal(run(['init', '--framework', 'react-spa'], dir).status, 0);
+  const request = { shape: 'list', name: 'MyCategories', feature: 'ownership', entity: 'CategoryOwnership', fields: 'id:string,category:string', source: 'local' };
+  const written = generateShapeVertical(dir, request, LAYERS); // domain,service,hook,component,page,controller -- "workflows" deliberately left out, like the issue's repro
+  assert.ok(written.length > 0);
+  const featureDir = path.join(dir, 'features', 'ownership');
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')), 'index.ts scaffolded');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')), 'types.ts scaffolded');
+  for (const folder of ['controllers', 'workflows', 'hooks', 'domain', 'services', 'pages', 'components']) {
+    assert.ok(fs.existsSync(path.join(featureDir, folder)), `missing folder: ${folder}`);
+  }
+  const { violations } = validateSeparationOfConcerns(dir);
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), [], 'no more missing-folder violation');
+});
+
+test('#677: create unit --shape (a single layer) into a missing feature scaffolds it too', () => {
+  const dir = makeTempDir('construct-shape-missing-feature-single-');
+  assert.equal(run(['init', '--framework', 'react-spa'], dir).status, 0);
+  const file = generateShapeLayer(dir, { ...REQUEST, feature: 'freshfeature', layer: 'domain' });
+  assert.ok(file.length > 0);
+  const featureDir = path.join(dir, 'features', 'freshfeature');
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
 });
 
 test('types.ts keeps what a person wrote: an existing declaration is not replaced, a missing one is appended, a second run changes nothing', () => {

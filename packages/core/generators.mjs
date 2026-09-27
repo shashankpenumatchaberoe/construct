@@ -169,6 +169,30 @@ export function createFeature(root,name){
  return base;
 }
 
+/**
+ * Create the feature folder first when `feature`'s folder doesn't exist yet — the shared check every
+ * writing flow that scaffolds INTO a feature (rather than modifying one that must already be there) runs
+ * before it writes a single layer file (#677). Without it, a layer/unit generator happily writes into a
+ * feature missing its other layer folders and its `types.ts`/`index.ts`, which only fails later, confusingly,
+ * at `construct validate` (SLICE-001) — the person never even sees the feature was never created. Idempotent
+ * (a no-op past the first call for the same feature) and safe to call from a loop over several layers.
+ *
+ * @param {string} root Project root.
+ * @param {string} feature Feature name.
+ * @returns {boolean} `true` when the feature was just scaffolded, `false` when it already existed.
+ *
+ * @example
+ * ensureFeatureExists(root, 'ownership'); // => true — features/ownership now has its full skeleton
+ * ensureFeatureExists(root, 'ownership'); // => false — already there, nothing written
+ */
+export function ensureFeatureExists(root,feature){
+ const config=loadConfig(root);
+ const dir=path.join(root,config.features?.root||'features',feature);
+ if(fs.existsSync(dir)&&fs.statSync(dir).isDirectory())return false;
+ createFeature(root,feature);
+ return true;
+}
+
 // Pure: compute the {file, content} a layer's template would produce,
 // without touching disk. Shared by generateLayer (below, unchanged disk-
 // writing behavior) and the Ticket 7.1 pipeline runner (packages/engine/pipeline.mjs),
@@ -210,10 +234,14 @@ export function renderLayer(root,layer,name,feature){
  */
 export function generateLayer(root,layer,name,feature){
  // renderLayer first: it validates the layer name and the identifier (#218)
- // with this layer's own label. Only then the #275 prerequisite check — still
- // before any write, so an unbuildable request leaves nothing on disk.
+ // with this layer's own label. Then the #275 prerequisite check — both
+ // read-only, so an unbuildable request still leaves nothing on disk, not
+ // even a scaffolded feature. Only once the request is known buildable does
+ // #677's missing-feature check run (a feature that doesn't exist yet is
+ // scaffolded now, so this layer never lands alone in an incomplete one).
  const {file,content}=renderLayer(root,layer,name,feature);
  assertLayerPrerequisites(root,name,feature,[layer]);
+ ensureFeatureExists(root,feature);
  write(file,content); // write() ensures the parent dir exists
  selfCheck(root,[file]);
  return file;

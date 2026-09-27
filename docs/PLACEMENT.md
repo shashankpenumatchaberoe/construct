@@ -306,6 +306,14 @@ everything it wires):
         ],
         "files": [
           {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
+          {
             "path": "features/billing/domain/SubscriptionPlan.tsx",
             "change": "create",
             "layer": "domain"
@@ -334,6 +342,14 @@ everything it wires):
         ],
         "files": [
           {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
+          {
             "path": "features/billing/services/SubscriptionPlan.tsx",
             "change": "create",
             "layer": "service"
@@ -360,6 +376,14 @@ everything it wires):
           "billing"
         ],
         "files": [
+          {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
           {
             "path": "features/billing/services/ManageBillingDetails.tsx",
             "change": "create",
@@ -389,6 +413,14 @@ everything it wires):
         ],
         "files": [
           {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
+          {
             "path": "features/billing/workflows/ManageBillingDetails.tsx",
             "change": "create",
             "layer": "workflow"
@@ -417,6 +449,14 @@ everything it wires):
         ],
         "files": [
           {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
+          {
             "path": "features/billing/hooks/useClickButton.tsx",
             "change": "create",
             "layer": "hook"
@@ -443,6 +483,14 @@ everything it wires):
           "billing"
         ],
         "files": [
+          {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
           {
             "path": "features/billing/components/SubscriptionPlan.tsx",
             "change": "create",
@@ -471,6 +519,14 @@ everything it wires):
           "billing"
         ],
         "files": [
+          {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
           {
             "path": "features/billing/pages/SubscriptionPlanPage.tsx",
             "change": "create",
@@ -503,6 +559,14 @@ everything it wires):
         ],
         "files": [
           {
+            "path": "features/billing/types.ts",
+            "change": "create"
+          },
+          {
+            "path": "features/billing/index.ts",
+            "change": "create"
+          },
+          {
             "path": "features/billing/controllers/SubscriptionPlanController.tsx",
             "change": "create",
             "layer": "controller"
@@ -521,24 +585,35 @@ everything it wires):
 ```json
 {
   "b1": [
+    "features/billing/types.ts",
+    "features/billing/index.ts",
     "features/billing/domain/SubscriptionPlan.tsx",
     "features/billing/services/SubscriptionPlan.tsx",
     "features/billing/controllers/SubscriptionPlanController.tsx"
   ],
   "b1-view": [
+    "features/billing/types.ts",
+    "features/billing/index.ts",
     "features/billing/components/SubscriptionPlan.tsx",
     "features/billing/pages/SubscriptionPlanPage.tsx"
   ],
   "b2": [
+    "features/billing/types.ts",
+    "features/billing/index.ts",
     "features/billing/hooks/useClickButton.tsx",
     "features/billing/controllers/SubscriptionPlanController.tsx"
   ],
   "b3": [
+    "features/billing/types.ts",
+    "features/billing/index.ts",
     "features/billing/services/ManageBillingDetails.tsx",
     "features/billing/workflows/ManageBillingDetails.tsx"
   ]
 }
 ```
+
+(#677: every `create.unit` step also declares the feature's own `types.ts`/`index.ts`, since `features/billing`
+doesn't exist yet at plan time — deduped per block above.)
 
 ## The two other examples
 
@@ -692,6 +767,7 @@ The files each step declares (`touches`) and writes, by block (the approval gate
 ```json
 {
   "b1": [
+    "features/products/index.ts",
     "features/products/domain/Products.domain.ts",
     "features/products/domain/ProductsStore.domain.ts",
     "features/products/types.ts",
@@ -700,6 +776,8 @@ The files each step declares (`touches`) and writes, by block (the approval gate
     "features/products/controllers/ProductsController.controller.tsx"
   ],
   "b1-view": [
+    "features/products/types.ts",
+    "features/products/index.ts",
     "features/products/components/ProductRow.component.tsx",
     "features/products/components/ProductList.component.tsx",
     "features/products/components/ProductsNotice.component.tsx",
@@ -708,6 +786,11 @@ The files each step declares (`touches`) and writes, by block (the approval gate
   ]
 }
 ```
+
+(#677: `features/products` doesn't exist yet at plan time, so each block also declares the feature's own
+`types.ts`/`index.ts` — whichever of the two it doesn't already touch itself — the same as a standalone
+`construct create layer`/`create unit` into a missing feature now scaffolds the feature first instead of
+writing a broken one.)
 
 **What each file is.** Every unit is built with the typed factory of its layer and is named `Name.layer.ext` (rule READ-004),
 so the output passes `construct validate` with the typed-contracts phase 1 rules on (HOOK-001, PAGE-008/009, DOMAIN-002,
@@ -797,6 +880,7 @@ answered `detail` (by the rules provider) gives thirteen commands; the files are
 ```json
 {
   "b1": [
+    "features/product/index.ts",
     "features/product/domain/Product.domain.ts",
     "features/product/domain/ProductStore.domain.ts",
     "features/product/types.ts",
@@ -805,6 +889,8 @@ answered `detail` (by the rules provider) gives thirteen commands; the files are
     "features/product/controllers/ProductController.controller.tsx"
   ],
   "b1-view": [
+    "features/product/types.ts",
+    "features/product/index.ts",
     "features/product/components/ProductDetailRow.component.tsx",
     "features/product/components/ProductDetails.component.tsx",
     "features/product/components/ProductNotice.component.tsx",
@@ -813,6 +899,9 @@ answered `detail` (by the rules provider) gives thirteen commands; the files are
   ]
 }
 ```
+
+(#677: each block also declares the feature's own `types.ts`/`index.ts` -- whichever of the two it doesn't
+already touch itself -- since `features/product` doesn't exist yet at plan time.)
 
 | File | What it holds |
 |---|---|
@@ -853,6 +942,7 @@ sits in a route with a parameter passes it as the prop.
 ```json
 {
   "b1": [
+    "features/add-product/index.ts",
     "features/add-product/domain/AddProduct.domain.ts",
     "features/add-product/domain/AddProductStore.domain.ts",
     "features/add-product/types.ts",
@@ -861,6 +951,8 @@ sits in a route with a parameter passes it as the prop.
     "features/add-product/controllers/AddProductController.controller.tsx"
   ],
   "b1-view": [
+    "features/add-product/types.ts",
+    "features/add-product/index.ts",
     "features/add-product/components/AddProductField.component.tsx",
     "features/add-product/components/AddProductForm.component.tsx",
     "features/add-product/components/AddProductNotice.component.tsx",
@@ -870,6 +962,9 @@ sits in a route with a parameter passes it as the prop.
   ]
 }
 ```
+
+(#677: each block also declares the feature's own `types.ts`/`index.ts` -- whichever of the two it doesn't
+already touch itself -- since `features/add-product` doesn't exist yet at plan time.)
 
 | File | What it holds |
 |---|---|
@@ -924,6 +1019,7 @@ imports no service. Nothing is charted, stored, routed between panels or refresh
 ```json
 {
   "b1": [
+    "features/orders-dashboard/index.ts",
     "features/orders-dashboard/domain/OrdersDashboard.domain.ts",
     "features/orders-dashboard/domain/OrdersDashboardStore.domain.ts",
     "features/orders-dashboard/types.ts",
@@ -932,6 +1028,8 @@ imports no service. Nothing is charted, stored, routed between panels or refresh
     "features/orders-dashboard/controllers/OrdersDashboardController.controller.tsx"
   ],
   "b1-view": [
+    "features/orders-dashboard/types.ts",
+    "features/orders-dashboard/index.ts",
     "features/orders-dashboard/components/OrdersDashboardTile.component.tsx",
     "features/orders-dashboard/components/OrdersDashboardTiles.component.tsx",
     "features/orders-dashboard/components/OrdersDashboardPanel.component.tsx",
@@ -944,6 +1042,9 @@ imports no service. Nothing is charted, stored, routed between panels or refresh
   ]
 }
 ```
+
+(#677: each block also declares the feature's own `types.ts`/`index.ts` -- whichever of the two it doesn't
+already touch itself -- since `features/orders-dashboard` doesn't exist yet at plan time.)
 
 | File | What it holds |
 |---|---|
@@ -1004,6 +1105,7 @@ The flow is a **real state machine in the workflow layer**: XState `setup(...).c
 ```json
 {
   "b1": [
+    "features/signup/index.ts",
     "features/signup/domain/Signup.domain.ts",
     "features/signup/domain/SignupValidity.domain.ts",
     "features/signup/domain/SignupScreen.domain.ts",
@@ -1015,6 +1117,8 @@ The flow is a **real state machine in the workflow layer**: XState `setup(...).c
     "features/signup/controllers/SignupController.controller.tsx"
   ],
   "b1-view": [
+    "features/signup/types.ts",
+    "features/signup/index.ts",
     "features/signup/components/SignupField.component.tsx",
     "features/signup/components/SignupFrame.component.tsx",
     "features/signup/components/SignupDetailsStep.component.tsx",
@@ -1027,6 +1131,9 @@ The flow is a **real state machine in the workflow layer**: XState `setup(...).c
   ]
 }
 ```
+
+(#677: each block also declares the feature's own `types.ts`/`index.ts` -- whichever of the two it doesn't
+already touch itself -- since `features/signup` doesn't exist yet at plan time.)
 
 `--steps a,b,c` (on `create.unit`, `create.layer` and `create.proof`, in `schemas/plan.v1.json`) names the steps: lower-case words with `-`
 between them, two to six, unique, none called `submitting` or `submitted`; nothing given is `details,review,done`. Another shape refuses it.

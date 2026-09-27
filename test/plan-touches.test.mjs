@@ -56,13 +56,46 @@ test('create.layer: derives the files generateVertical writes, in any listed ord
   assert.deepEqual(expectedFiles(root, 'create.layer', { name: 'cart', feature: 'wishlist', layers: ['service', 'domain', 'page'] }), want);
 });
 
+// #677 -- a feature that doesn't exist yet is scaffolded first (generators.mjs's ensureFeatureExists), so the
+// plan preview must declare its types.ts/index.ts too, or the approval gate would refuse a file the step is
+// actually about to write.
+test('#677: create.unit derives the feature\'s types.ts/index.ts too when the feature does not exist yet', () => {
+  const root = makeTempDir('og677-');
+  const before = tree(root);
+  const want = expectedFiles(root, 'create.unit', { layer: 'domain', name: 'itemRules', feature: 'wishlist' });
+  generateLayer(root, 'domain', 'itemRules', 'wishlist');
+  assert.deepEqual(paths(want), added(root, before));
+  assert.ok(want.some((f) => f.path === 'features/wishlist/types.ts' && f.change === 'create'));
+  assert.ok(want.some((f) => f.path === 'features/wishlist/index.ts' && f.change === 'create'));
+});
+
+test('#677: create.layer derives the feature\'s types.ts/index.ts too when the feature does not exist yet', () => {
+  const root = makeTempDir('og677-');
+  const before = tree(root);
+  const want = expectedFiles(root, 'create.layer', { name: 'cart', feature: 'wishlist', layers: 'domain,service' });
+  generateVertical(root, 'cart', 'wishlist', ['domain', 'service']);
+  assert.deepEqual(paths(want), added(root, before));
+  assert.ok(want.some((f) => f.path === 'features/wishlist/types.ts' && f.change === 'create'));
+  assert.ok(want.some((f) => f.path === 'features/wishlist/index.ts' && f.change === 'create'));
+});
+
+test('#677: an already-existing feature is not re-declared (nothing new to create)', () => {
+  const root = makeTempDir('og677-');
+  createFeature(root, 'wishlist');
+  const want = expectedFiles(root, 'create.unit', { layer: 'domain', name: 'itemRules', feature: 'wishlist' });
+  assert.equal(want.length, 1);
+  assert.equal(want[0].path, 'features/wishlist/domain/ItemRules.tsx');
+});
+
 test('the features folder comes from architecture.yml', () => {
   const root = makeTempDir('og470-');
   fs.writeFileSync(path.join(root, 'architecture.yml'), 'features:\n  root: src/features\n');
+  // Feature created ahead of time, so this test stays about the custom root, independent of #677's
+  // missing-feature prepend (covered separately above).
+  createFeature(root, 'billing');
   const before = tree(root);
   const want = expectedFiles(root, 'create.unit', { layer: 'domain', name: 'x', feature: 'billing' });
   assert.equal(want[0].path, 'src/features/billing/domain/X.tsx');
-  createFeature(root, 'billing');
   generateLayer(root, 'domain', 'x', 'billing');
   assert.ok(added(root, before).includes(want[0].path));
 });

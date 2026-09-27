@@ -19,7 +19,7 @@ import path from 'node:path';
 import { parseToAst, walkAst } from '../../packages/ast/index.mjs';
 import { loadConfig } from '../core/config.mjs';
 import { write } from '../core/fs.mjs';
-import { selfCheck, pascalCase } from '../core/generators.mjs';
+import { selfCheck, pascalCase, ensureFeatureExists } from '../core/generators.mjs';
 import { ConstructError, EXIT_CODES } from '../core/diagnostics.mjs';
 import { extractMachines } from './workflowExtractor.mjs';
 import { listWorkflowSourceFiles, readWorkflowSource } from './workflowSource.mjs';
@@ -423,6 +423,7 @@ export function ingestPage(root, name, feature, fromPath) {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const { pageSource, propsSource, slots, testIds } = transformPristineSource(source, { feature, name: cap, flow: featureFlow(root, feature) });
 
+  ensureFeatureExists(root, feature); // #677: a missing feature is scaffolded first, not silently written into
   const dir = path.join(root, config.features?.root || 'features', feature, 'pages');
   const pageFile = path.join(dir, `${cap}Page.tsx`);
   const propsFile = path.join(dir, `${cap}PageProps.ts`);

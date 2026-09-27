@@ -22,7 +22,7 @@ import path from 'node:path';
 import { write, rel } from './fs.mjs';
 import { loadConfig } from './config.mjs';
 import { ConstructError, EXIT_CODES } from './diagnostics.mjs';
-import { LAYER_ORDER, pascalCase, selfCheck } from './generators.mjs';
+import { LAYER_ORDER, ensureFeatureExists, pascalCase, selfCheck } from './generators.mjs';
 import { PLAN_SHAPES } from './plan.mjs';
 import { FIELD_TYPES, TYPED_CONTRACTS_SPECIFIER, cap, importLine, lines, lowerFirst, operationComment, rowText, sampleRows, show, ts, words } from './shape-kit.mjs';
 import { operationOf, readSource, storeNames } from './shape-source.mjs';
@@ -536,6 +536,7 @@ export function assertShapeLayers(root, request, layers) {
  */
 export function generateShapeLayer(root, request) {
   assertShapeLayers(root, request, [request.layer]);
+  ensureFeatureExists(root, request.feature); // #677: a missing feature is scaffolded first, not silently written into
   const files = shapeFiles(root, request);
   for (const f of files) write(f.path, f.content);
   selfCheck(root, files.map((f) => f.path));

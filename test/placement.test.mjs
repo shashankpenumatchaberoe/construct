@@ -114,7 +114,9 @@ test('the billing example end to end: card, placement, plan', () => {
     'Create controller SubscriptionPlan',
   ]);
   assert.deepEqual(compiled.plan.steps.map((s) => s.dependsOn ?? []), [[], ['s1'], ['s1', 's2'], ['s1'], ['s1', 's4'], ['s1', 's5'], ['s1'], ['s1', 's7'], ['s1', 's2', 's3', 's6', 's8']]);
-  assert.deepEqual(compiled.files.b3, ['features/billing/services/ManageBillingDetails.tsx', 'features/billing/workflows/ManageBillingDetails.tsx']);
+  // #677: each create.unit step also declares the feature's own types.ts/index.ts, since "billing" doesn't exist
+  // on disk yet at plan time (deduped across the block's two steps).
+  assert.deepEqual(compiled.files.b3, ['features/billing/types.ts', 'features/billing/index.ts', 'features/billing/services/ManageBillingDetails.tsx', 'features/billing/workflows/ManageBillingDetails.tsx']);
 });
 
 test('the profile-picture example: upload is a client leaf, seeing it is presentational, updating it is a mutation', () => {

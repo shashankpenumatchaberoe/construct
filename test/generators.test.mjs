@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createFeature, generateLayer, generateVertical, missingLayerPrerequisites, selfCheck } from '../packages/core/generators.mjs';
+import { createFeature, ensureFeatureExists, generateLayer, generateVertical, missingLayerPrerequisites, selfCheck } from '../packages/core/generators.mjs';
 import { validateArchitecture } from '../packages/core/architecture-enforcer.mjs';
+import { validateSeparationOfConcerns } from '../packages/core/soc-enforcer.mjs';
 import { ConstructError, EXIT_CODES } from '../packages/core/diagnostics.mjs';
 import { parseToAst } from '../packages/ast/index.mjs';
 import { makeTempDir } from '../test-utils/tmpdir.mjs';
@@ -61,6 +62,50 @@ test('createFeature scaffolds the full layer folder set plus types/index', () =>
   }
   assert.ok(fs.existsSync(path.join(base, 'types.ts')));
   assert.ok(fs.existsSync(path.join(base, 'index.ts')));
+});
+
+// #677 -- a `create.unit`/`create.layer` (and plain `create page`/`create <layer>`) request into a feature that
+// doesn't exist yet used to write only the requested layer file(s), leaving the feature without its other layer
+// folders or its types.ts/index.ts -- a silent, confusing setup for `construct validate`'s later SLICE-001. The
+// feature is now scaffolded first (same output as `construct create feature`), so the request ends with a
+// feature that passes validate, not a broken partial one.
+test('#677: ensureFeatureExists scaffolds a missing feature once, and is a no-op once it exists', () => {
+  const dir = tmpProject();
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'billing')), false);
+  assert.equal(ensureFeatureExists(dir, 'billing'), true, 'created it');
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'billing', 'types.ts')));
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'billing', 'index.ts')));
+  assert.equal(ensureFeatureExists(dir, 'billing'), false, 'already there, nothing to do');
+});
+
+test('#677: generateLayer (a single unit, e.g. `create page`) into a missing feature scaffolds the feature first', () => {
+  const dir = tmpProject();
+  const file = generateLayer(dir, 'page', 'Bad', 'nope'); // the issue's own second repro: `construct create page Bad --feature nope`
+  assert.ok(fs.existsSync(file));
+  const featureDir = path.join(dir, 'features', 'nope');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  for (const folder of ['controllers', 'workflows', 'hooks', 'domain', 'services', 'pages', 'components']) {
+    assert.ok(fs.existsSync(path.join(featureDir, folder)), `missing folder: ${folder}`);
+  }
+  const { violations } = validateSeparationOfConcerns(dir);
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), []);
+});
+
+test('#677: generateVertical (`create layer`) into a missing feature scaffolds the feature first, even with a partial --layers list', () => {
+  const dir = tmpProject();
+  // Deliberately leaves "workflow" out of --layers, exactly like the issue's first repro -- without the fix
+  // this alone used to be enough to trip SLICE-001 (a missing workflows/ folder), regardless of the feature.
+  const files = generateVertical(dir, 'MyCategories', 'ownership', ['domain', 'service', 'hook', 'component', 'page', 'controller']);
+  assert.equal(files.length, 6);
+  const featureDir = path.join(dir, 'features', 'ownership');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  for (const folder of ['controllers', 'workflows', 'hooks', 'domain', 'services', 'pages', 'components']) {
+    assert.ok(fs.existsSync(path.join(featureDir, folder)), `missing folder: ${folder}`);
+  }
+  const { violations } = validateSeparationOfConcerns(dir);
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), []);
 });
 
 test('createFeature PascalCases a hyphenated feature name into a valid type identifier', () => {

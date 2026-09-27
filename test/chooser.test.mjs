@@ -169,7 +169,11 @@ test('compile: the two-question chain (create.feature then create.unit) is a pla
   assert.deepEqual(r.plan.steps[0].args, { name: 'cart' });
   assert.deepEqual(r.plan.steps[0].touches.files.map((f) => f.path), ['features/cart/types.ts', 'features/cart/index.ts']);
   assert.deepEqual(r.plan.steps[1].touches.features, ['cart']);
-  assert.equal(r.plan.steps[1].touches.files[0].layer, 'domain');
+  // #677: step 2 also declares the feature's own types.ts/index.ts, since "cart" doesn't exist on disk yet at
+  // plan time (step 1 hasn't run) -- create.unit's own derived scope is accurate taken alone, even though step 1
+  // will already have created them by the time step 2 actually runs.
+  assert.deepEqual(r.plan.steps[1].touches.files.map((f) => f.path), ['features/cart/types.ts', 'features/cart/index.ts', 'features/cart/domain/CartRules.tsx']);
+  assert.equal(r.plan.steps[1].touches.files.at(-1).layer, 'domain');
   assert.deepEqual(Object.keys(r.plan).sort(), ['steps', 'ticket', 'version'], 'no top-level field validatePlan would reject');
   assert.deepEqual(r.errors, []);
 });

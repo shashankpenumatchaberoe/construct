@@ -202,6 +202,19 @@ test('generateWorkflow writes a workflow file that passes construct validate cle
   assert.deepEqual(violations.filter((v) => v.severity === 'error'), []);
 });
 
+// #677 -- `construct create workflow <name> --feature <missing> --from <path>` used to write only workflows/,
+// leaving the rest of the feature's layer folders and its types.ts/index.ts missing.
+test('#677: generateWorkflow into a missing feature scaffolds the feature first', () => {
+  const dir = makeTempDir('construct-workflow-test-');
+  const { file } = generateWorkflow(dir, 'Checkout', 'nope', CHECKOUT_DESCRIPTOR);
+  assert.equal(fs.existsSync(file), true);
+  const featureDir = path.join(dir, 'features', 'nope');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  const { violations } = validateArchitecture(dir);
+  assert.deepEqual(violations.filter((v) => v.severity === 'error'), []);
+});
+
 // ---- end-to-end via the real CLI binary ------------------------------------
 
 test('construct create workflow <name> --feature <f> --from <path> compiles end to end and construct validate passes', () => {

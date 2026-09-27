@@ -459,6 +459,61 @@ function assertNonNegativeDurations(text, { min = 1 } = {}) {
   return matches.map((m) => Number(m[1]));
 }
 
+// #677 -- the issue's own repros, run through the real CLI end to end: a `create <layer>`/`create layer`/
+// `create page` into a feature that was never `construct create feature`d used to write into it anyway (exit
+// 0), leaving a feature with no `types.ts`/`index.ts` and, for `create layer`, no folder for a layer left out
+// of `--layers` -- a break only `construct validate` caught later, as an unrelated-looking SLICE-001. Each
+// command now scaffolds the missing feature first, so `construct validate` is clean afterward.
+function assertNoSliceViolations(dir) {
+  const res = run(['validate', '--format', 'json'], dir);
+  const violations = JSON.parse(res.stdout).violations;
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), [], JSON.stringify(violations, null, 2));
+}
+
+test('#677: `construct create page <name> --feature <missing>` (create.unit) scaffolds the feature first', () => {
+  const dir = emptyProjectDir();
+  const res = run(['create', 'page', 'Bad', '--feature', 'nope'], dir); // the issue's own second repro, verbatim
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'nope', 'types.ts')));
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'nope', 'index.ts')));
+  assertNoSliceViolations(dir);
+});
+
+test('#677: `construct create domain <name> --feature <missing>` (create.unit, no --shape) scaffolds the feature first', () => {
+  const dir = emptyProjectDir();
+  const res = run(['create', 'domain', 'Foo', '--feature', 'ghost'], dir);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'ghost', 'types.ts')));
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'ghost', 'index.ts')));
+  assertNoSliceViolations(dir);
+});
+
+test('#677: `construct create layer <Name> --feature <missing> --shape list ...` scaffolds the feature first (the issue\'s own first repro)', () => {
+  const dir = emptyProjectDir();
+  const res = run(
+    ['create', 'layer', 'MyCategories', '--feature', 'ownership', '--shape', 'list', '--entity', 'CategoryOwnership', '--fields', 'id:string,category:string', '--source', 'local', '--layers', 'domain,service,hook,component,page,controller'],
+    dir,
+  );
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  const featureDir = path.join(dir, 'features', 'ownership');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  for (const folder of ['controllers', 'workflows', 'hooks', 'domain', 'services', 'pages', 'components']) {
+    assert.ok(fs.existsSync(path.join(featureDir, folder)), `missing folder: ${folder}`);
+  }
+  assertNoSliceViolations(dir);
+});
+
+test('#677: `construct create layer <Name> --feature <missing> --layers ...` (no --shape) scaffolds the feature first', () => {
+  const dir = emptyProjectDir();
+  const res = run(['create', 'layer', 'Checkout', '--feature', 'billing', '--layers', 'domain,hook'], dir);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  const featureDir = path.join(dir, 'features', 'billing');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  assertNoSliceViolations(dir);
+});
+
 test('create feature prints a non-negative timing duration', () => {
   const dir = emptyProjectDir();
   const res = run(['create', 'feature', 'checkout'], dir);

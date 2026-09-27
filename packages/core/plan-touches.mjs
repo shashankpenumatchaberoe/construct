@@ -3,6 +3,7 @@
 // Deterministic and read-only: it computes the same paths the generators write (`layerTargetFile`, `createFeature`)
 // without touching the disk, and never calls a model. A flow it cannot derive exactly answers `null`, never a guess:
 // an undeclared file is refused loudly at approval, a wrongly declared one would be trusted silently.
+import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig } from './config.mjs';
 import { LAYER_ORDER, layerTargetFile, pascalCase } from './generators.mjs';
@@ -19,6 +20,25 @@ const isName = (v) => typeof v === 'string' && v.trim().length > 0;
 const asList = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : []).map((x) => String(x).trim()).filter(Boolean);
 const rel = (root, abs) => path.relative(root, abs).split(path.sep).join('/');
 const shapeArgs = (args) => ({ shape: args.shape, name: args.name, feature: args.feature, entity: args.entity, fields: args.fields, source: args.source, steps: args.steps, states: args.states });
+
+/**
+ * Prepend `types.ts`/`index.ts` to `files` when `feature`'s folder doesn't exist yet — the plan-preview side of #677:
+ * `create.unit`/`create.layer` now scaffold a missing feature before writing into it (generators.mjs's
+ * `ensureFeatureExists`), so the plan step's own declared scope must say so too, or the approval gate would refuse a
+ * file the step is actually about to write. A path the flow's own touches already lists (a shaped domain layer already
+ * touches `types.ts`) is not duplicated; declaring it a 'create' there instead of a 'modify' is left to that flow's own
+ * touches, this only adds what would otherwise be missing entirely.
+ */
+function withMissingFeatureTouches(root, config, feature, files) {
+  if (!files) return null;
+  const base = path.join(config.features?.root || 'features', feature);
+  if (fs.existsSync(path.join(root, base))) return files;
+  const already = new Set(files.map((f) => f.path));
+  const featureFiles = ['types.ts', 'index.ts']
+    .map((f) => ({ path: rel(root, path.join(root, base, f)), change: 'create' }))
+    .filter((f) => !already.has(f.path));
+  return [...featureFiles, ...files];
+}
 
 /** Flows whose written files are derived here. Every other writing flow answers `null` until its output is pinned by a test. */
 export const DERIVED_FLOWS = Object.freeze(['create.feature', 'create.unit', 'create.layer', 'create.proof', 'create.route', 'add.dependency', 'add.env', 'wrap.provider', 'guard.route', 'create.store', 'create.handler']);
@@ -44,18 +64,25 @@ export function expectedFiles(root, flowId, args = {}) {
     if (flowId === 'create.unit') {
       if (!isName(args.name) || !isName(args.feature) || !LAYER_ORDER.includes(args.layer)) return null;
       // #619: a shaped unit writes every file its shape lists for the layer (and the feature's types.ts for the domain layer).
-      if (args.shape !== undefined) return shapeTouches(root, { ...shapeArgs(args), layer: args.layer });
-      return [{ path: rel(root, layerTargetFile(root, args.layer, args.name, args.feature, config)), change: 'create', layer: args.layer }];
+      // #677: plus the feature's own types.ts/index.ts first, when the feature doesn't exist yet.
+      if (args.shape !== undefined) return withMissingFeatureTouches(root, config, args.feature, shapeTouches(root, { ...shapeArgs(args), layer: args.layer }));
+      return withMissingFeatureTouches(root, config, args.feature, [{ path: rel(root, layerTargetFile(root, args.layer, args.name, args.feature, config)), change: 'create', layer: args.layer }]);
     }
     if (flowId === 'create.layer') {
       const layers = asList(args.layers);
       if (!isName(args.name) || !isName(args.feature) || !layers.length || !layers.every((l) => LAYER_ORDER.includes(l))) return null;
       if (args.shape !== undefined) {
         const shaped = LAYER_ORDER.filter((l) => layers.includes(l)).map((l) => shapeTouches(root, { ...shapeArgs(args), layer: l }));
-        return shaped.every(Boolean) ? shaped.flat() : null;
+        return shaped.every(Boolean) ? withMissingFeatureTouches(root, config, args.feature, shaped.flat()) : null;
       }
-      // Generated in canonical order, whatever order the step lists them in (generateVertical).
-      return LAYER_ORDER.filter((l) => layers.includes(l)).map((l) => ({ path: rel(root, layerTargetFile(root, l, args.name, args.feature, config)), change: 'create', layer: l }));
+      // Generated in canonical order, whatever order the step lists them in (generateVertical). #677: plus the
+      // feature's own types.ts/index.ts first, when the feature doesn't exist yet.
+      return withMissingFeatureTouches(
+        root,
+        config,
+        args.feature,
+        LAYER_ORDER.filter((l) => layers.includes(l)).map((l) => ({ path: rel(root, layerTargetFile(root, l, args.name, args.feature, config)), change: 'create', layer: l })),
+      );
     }
     // #623: the proof of a shaped screen writes its test file (when its kind applies to this project) and declares the test regions.
     if (flowId === 'create.proof') {

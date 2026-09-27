@@ -109,6 +109,25 @@ test('ingestPage writes a page + Props file that passes construct validate clean
   assert.deepEqual(violations.filter((v) => v.severity === 'error'), []);
 });
 
+// #677 -- `construct create page <name> --feature <missing> --from <file>` used to write only pages/, leaving
+// the rest of the feature's layer folders and its types.ts/index.ts missing. Uses a source with no relative
+// imports of its own (plain HTML elements only), so the only thing under test is the feature scaffold -- the
+// fixtures under fixtures/subframe-export/ each need their own companion components pre-written, which is a
+// separate, unrelated prerequisite already covered by the other tests in this file.
+test('#677: ingestPage into a missing feature scaffolds the feature first', () => {
+  const dir = makeTempDir('construct-page-transformer-');
+  const source = path.join(dir, 'PlainExport.tsx');
+  fs.writeFileSync(source, `export function PlainExport() {\n  return (<button onClick={() => {}}>Go</button>);\n}\n`);
+  const { pageFile, propsFile } = ingestPage(dir, 'Checkout', 'nope', source);
+  assert.equal(fs.existsSync(pageFile), true);
+  assert.equal(fs.existsSync(propsFile), true);
+  const featureDir = path.join(dir, 'features', 'nope');
+  assert.ok(fs.existsSync(path.join(featureDir, 'types.ts')));
+  assert.ok(fs.existsSync(path.join(featureDir, 'index.ts')));
+  const { violations } = validateArchitecture(dir);
+  assert.deepEqual(violations.filter((v) => v.severity === 'error'), []);
+});
+
 test('ingestPage: hyphenated / underscored / camel names give identical valid identifiers and file names (#216)', () => {
   const fixture = path.join(REPO_ROOT, 'fixtures', 'subframe-export', 'CheckoutExport.tsx');
   const outputs = [];

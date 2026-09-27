@@ -30,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, write, rel } from './fs.mjs';
 import { loadConfig } from './config.mjs';
-import { createFeature, pascalCase as identifierPascalCase } from './generators.mjs';
+import { ensureFeatureExists, pascalCase as identifierPascalCase } from './generators.mjs';
 import { validateArchitecture } from './architecture-enforcer.mjs';
 import { parseIndexExports } from './soc-enforcer.mjs';
 import { ConstructError, EXIT_CODES } from './diagnostics.mjs';
@@ -161,7 +161,7 @@ export function ensureClient(root) {
   const config = loadConfig(root);
   const featuresRoot = config.features?.root || 'features';
   const coreDir = path.join(root, featuresRoot, 'core');
-  if (!fs.existsSync(coreDir)) createFeature(root, 'core');
+  ensureFeatureExists(root, 'core');
 
   const clientPath = path.join(coreDir, 'services', 'client.ts');
   write(clientPath, renderClient(config.project?.dataLayer?.provider || 'fetchBaseQuery'));
@@ -367,7 +367,7 @@ export async function generateServiceFromSpec(root, name, feature, specPath, opt
   const config = loadConfig(root);
   const featuresRoot = config.features?.root || 'features';
   const featureDir = path.join(root, featuresRoot, feature);
-  if (!fs.existsSync(featureDir)) createFeature(root, feature);
+  ensureFeatureExists(root, feature);
 
   const servicesDir = path.join(featureDir, 'services');
   ensureDir(servicesDir);
