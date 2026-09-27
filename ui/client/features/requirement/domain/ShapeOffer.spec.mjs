@@ -30,7 +30,10 @@ test('the offer view: unanswered, list is marked suggested, nothing is chosen an
   assert.match(offer.status, /^Not chosen yet, so the plan below is the empty scaffold\. Suggested by rules: list screen/);
   assert.deepEqual([offer.suggestion.label, offer.suggestion.option], ['suggested by rules', 'list'], 'an older server: the offer carries the rules suggestion itself');
   assert.deepEqual(v.result.timeline.map((s) => s.kind), ['page-load', 'presentation'], 'the plain scaffold: no server read yet');
-  assert.equal(v.result.files.length, 2);
+  // #677: create.unit's derived touches now also declare the feature's own types.ts/index.ts (products does not exist
+  // on disk yet at plan time), so the plain scaffold (component + page, neither layer previously declared them) gains
+  // both files, deduped across the two steps.
+  assert.equal(v.result.files.length, 4);
 });
 
 test('the offer never blocks Approve: an unanswered offer approves the plain plan the screen shows', () => {
@@ -48,7 +51,9 @@ test('choosing list: the view names the chooser (person), the plan has 9 steps (
   assert.equal(offer.decidedBy, 'person');
   assert.equal(offer.status, 'Chosen: List screen, generated with typed code. Decided by: person.');
   assert.deepEqual(list.result.timeline.map((s) => s.kind), ['page-load', 'server-read', 'presentation'], 'the list shape reads on the server, then shows');
-  assert.equal(list.result.files.length, 11, 'the ten files of the shape and the local store the rules default (#621) writes');
+  // #677: create.unit's derived touches now also declare the feature's index.ts (types.ts was already declared by
+  // the domain layer's own shape touches, #619); the shaped ten files, the local store (#621) and now index.ts too.
+  assert.equal(list.result.files.length, 12, 'the ten files of the shape, the local store the rules default (#621) writes, and index.ts (#677)');
   assert.ok(list.result.files.includes('features/products/services/Products.service.ts'));
   assert.equal(chosen.plan.steps.length, 12, 'the feature, six units, the wiring, the type-check (#632), the proof and its run');
   assert.ok(chosen.plan.steps.slice(1, 7).every((s) => s.args.shape === 'list'));
@@ -95,7 +100,9 @@ test('answering the data source: the view names the chooser, the other option is
   assert.deepEqual(source.options.map((o) => o.chosen), [false, true]);
   assert.equal(source.status, 'Chosen: Call GET /api/products. Decided by: person.');
   assert.equal(source.decidedBy, 'person');
-  assert.equal(v.result.files.length, 10, 'the endpoint source writes no store');
+  // #677: create.unit's derived touches now also declare the feature's index.ts (types.ts was already declared by
+  // the domain layer's own shape touches, #619), same as the local-source count in the test above.
+  assert.equal(v.result.files.length, 11, 'the endpoint source writes no store, plus index.ts (#677)');
   const target = { id: 'q-source', source: 'placement' };
   assert.deepEqual(withAnswer(withAnswer([{ id: 'q-shape', option: 'list' }], target, 'endpoint'), target, 'local'), [{ id: 'q-shape', option: 'list' }, { id: 'q-source', option: 'local' }]);
 });
