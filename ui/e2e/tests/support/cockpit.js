@@ -53,5 +53,5 @@ export async function setTheme(page, theme) {
 // Notes tab beside it. Goes to `url` and opens that tab.
 export async function gotoNotes(page, url = '/plan') {
   await gotoCockpit(page, url);
-  await page.getByRole('complementary', { name: 'Browser' }).getByRole('tab', { name: 'Notes' }).click();
+  await page.getByRole('tablist', { name: 'Browser' }).getByRole('tab', { name: 'Notes' }).click();
 }
