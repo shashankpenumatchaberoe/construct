@@ -2,8 +2,10 @@
 // implementation can be swapped (e.g. a devtools-protocol or websocket source)
 // without touching the hook/component layers.
 /** What the previewed app tells the Cockpit besides a selection (#378): the preview plugin is loaded (`ready`),
- * or the app threw an uncaught error (`error`). Nothing else crosses. */
-export type PreviewSignal = { type: 'ready' } | { type: 'error'; message: string };
+ * or the app threw an uncaught error (`error`). `src` (#558) is the stack's top project frame as a
+ * `data-cx-src`-shaped "file:line:col" string, or null when the stack has no project frame (a library-only
+ * stack shows no "Show in source" button). Nothing else crosses. */
+export type PreviewSignal = { type: 'ready' } | { type: 'error'; message: string; src: string | null };
 
 export interface PreviewSource {
   /** Page being previewed. */
@@ -36,7 +38,13 @@ export function createIframePreviewSource(url: string, getFrameWindow: () => Win
     onSelect: (handler) => subscribe((d) => (d.type === 'construct:select' && typeof d.src === 'string' ? d.src : null), handler),
     onSignal: (handler) => subscribe<PreviewSignal>((d) => {
       if (d.type === 'construct:ready') return { type: 'ready' };
-      if (d.type === 'construct:error') return { type: 'error', message: typeof d.message === 'string' ? d.message.slice(0, 300) : 'Unknown error' };
+      if (d.type === 'construct:error') {
+        return {
+          type: 'error',
+          message: typeof d.message === 'string' ? d.message.slice(0, 300) : 'Unknown error',
+          src: typeof d.src === 'string' ? d.src : null,
+        };
+      }
       return null;
     }, handler),
   };

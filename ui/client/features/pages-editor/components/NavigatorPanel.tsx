@@ -28,6 +28,11 @@ export function NavigatorPanel({ feature, file, contentHash }: NavigatorPanelPro
           <div className="navigator-file" data-testid="navigator-file">
             {current.view.path}
           </div>
+          {/* #558: set only when this step was opened at a known position (the live preview's "Show in
+              source"), not by following a reference -- confirms which exact line the error landed on. */}
+          {typeof current.view.line === 'number' && (
+            <p className="hint navigator-open-line" data-testid="navigator-open-line">Opened at line {current.view.line}</p>
+          )}
           {nav.hopError && <p className="status-error">{nav.hopError}</p>}
           <LinkedCode source={current.view.source} references={current.view.references} onFollow={nav.follow} label={`Source of ${current.view.path}`} />
           {unlinked.length > 0 && (

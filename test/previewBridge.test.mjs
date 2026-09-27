@@ -16,6 +16,15 @@ function fakeWindow() {
 }
 const el = (src, style = {}) => ({ style, getAttribute: () => src, closest() { return this; } });
 
+/** A fake window that can also resolve stack frames (#558): a real origin/URL and a DOM query. */
+function fakeErrorWindow(annotated = []) {
+  const base = fakeWindow();
+  base.win.location = { origin: 'http://preview.test', href: 'http://preview.test/' };
+  base.win.URL = URL;
+  base.win.document.querySelectorAll = () => annotated.map((src) => ({ getAttribute: () => src }));
+  return base;
+}
+
 test('click on an annotated element posts its src to the parent and suppresses the click', () => {
   const { win, listeners, posted } = fakeWindow();
   assert.equal(installPreviewBridge(win), true);
@@ -48,6 +57,48 @@ test('an uncaught error or unhandled rejection in the app is forwarded as constr
   assert.equal(posted[2][0].message, 'plain string');
   assert.equal(posted[3][0].message, 'Unknown error');
   assert.equal(posted[4][0].message.length, 300);
+});
+
+test('#558: an error whose stack has no project frame (only dependency/runtime frames, or none) reports src: null -- no "Show in source" button', () => {
+  const { win, winListeners, posted } = fakeErrorWindow();
+  installPreviewBridge(win);
+  posted.length = 0;
+  const libraryStack = 'TypeError: boom\n'
+    + '    at renderWithHooks (http://preview.test/node_modules/react-dom/cjs/react-dom.development.js:100:2)\n'
+    + '    at beginWork (http://preview.test/node_modules/react-dom/cjs/react-dom.development.js:200:3)';
+  winListeners.error({ message: 'boom', error: { stack: libraryStack } });
+  winListeners.error({ message: 'boom, no error object at all' });
+  winListeners.unhandledrejection({ reason: 'plain string, no stack' });
+  assert.deepEqual(posted.map(([m]) => m.src), [null, null, null]);
+});
+
+test('#558: an error thrown from a project file reports the stack\'s top project frame as file:line:col', () => {
+  const { win, winListeners, posted } = fakeErrorWindow();
+  installPreviewBridge(win);
+  posted.length = 0;
+  const stack = 'TypeError: boom\n'
+    + '    at Comp (http://preview.test/features/billing/pages/HomePage.tsx:12:5)\n'
+    + '    at renderWithHooks (http://preview.test/node_modules/react-dom/cjs/react-dom.development.js:100:2)';
+  winListeners.error({ message: 'boom', error: { stack } });
+  assert.equal(posted[0][0].src, 'features/billing/pages/HomePage.tsx:12:5');
+});
+
+test('#558: when the project file has a data-cx-src element on screen, its (always-original) position wins over the raw frame\'s', () => {
+  const { win, winListeners, posted } = fakeErrorWindow(['features/billing/pages/HomePage.tsx:9:3', 'features/billing/components/Footer.tsx:2:3']);
+  installPreviewBridge(win);
+  posted.length = 0;
+  const stack = 'TypeError: boom\n    at Comp (http://preview.test/features/billing/pages/HomePage.tsx:12:5)';
+  winListeners.error({ message: 'boom', error: { stack } });
+  assert.equal(posted[0][0].src, 'features/billing/pages/HomePage.tsx:9:3');
+});
+
+test('#558: an unhandled rejection\'s reason.stack is resolved the same way as a thrown error\'s', () => {
+  const { win, winListeners, posted } = fakeErrorWindow();
+  installPreviewBridge(win);
+  posted.length = 0;
+  const stack = 'Error: rejected\n    at load (http://preview.test/features/billing/pages/HomePage.tsx:20:8)';
+  winListeners.unhandledrejection({ reason: { message: 'rejected', stack } });
+  assert.equal(posted[0][0].src, 'features/billing/pages/HomePage.tsx:20:8');
 });
 
 test('hover outline is cleared when the pointer leaves the iframe (null relatedTarget), not on internal moves', () => {

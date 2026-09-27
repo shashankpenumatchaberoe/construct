@@ -21,7 +21,15 @@ export function LivePreviewPanel(props: LivePreviewView) {
     <GlassPanel className={fullScreen ? 'live-preview-panel live-preview-panel--full' : 'live-preview-panel'}>
       <LivePreviewToolbar {...props} />
       {message && !fullScreen && <p className="hint live-preview-message" role="status">{message}</p>}
-      {showFrame && !fullScreen && <LivePreviewNotes plugin={props.plugin} appError={props.appError} onDismissAppError={props.onDismissAppError} />}
+      {showFrame && !fullScreen && (
+        <LivePreviewNotes
+          plugin={props.plugin}
+          appError={props.appError}
+          appErrorSrc={props.appErrorSrc}
+          onDismissAppError={props.onDismissAppError}
+          onShowInSource={props.onShowInSource}
+        />
+      )}
       {showFrame ? (
         <div className="live-preview-stage">
           <div className="live-preview-box" ref={props.boxRef} style={props.frameStyle}>

@@ -11,3 +11,8 @@ export const getNavFile = (feature: string, file: string) =>
   getJson<NavView>(`/api/nav/file?feature=${encodeURIComponent(feature)}&path=${encodeURIComponent(file)}`);
 
 export const openNavReference =(from: string, ref: string, start: number) => postJson<NavView>('/api/nav/open', { from, ref, start });
+
+// #558: the live preview's "Show in source" -- a bare file + position already known client-side
+// (the framed app's own error stack), no `from` file or reference name to derive a target from.
+export const openNavSource = (file: string, line: number | null, column: number | null) =>
+  postJson<NavView>('/api/nav/open', { file, line, column });

@@ -6,7 +6,7 @@ export const PLUGIN_LINE = 'plugins: [constructPreview(), react()]';
 
 /** Two cards about the framed app itself (not the server): the preview plugin is not loaded, and the app threw.
  * Neither hides the frame: the app is still there, tree, impact and source keep working. */
-export function LivePreviewNotes(props: Pick<LivePreviewView, 'plugin' | 'appError' | 'onDismissAppError'>) {
+export function LivePreviewNotes(props: Pick<LivePreviewView, 'plugin' | 'appError' | 'appErrorSrc' | 'onDismissAppError' | 'onShowInSource'>) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(PLUGIN_LINE).then(() => setCopied(true), () => setCopied(false));
@@ -25,6 +25,10 @@ export function LivePreviewNotes(props: Pick<LivePreviewView, 'plugin' | 'appErr
         <div className="live-preview-note live-preview-note--danger" data-testid="preview-app-error" role="alert">
           <b>App error in the preview</b>
           <p>The app threw: {props.appError}</p>
+          {/* #558: only when the error's stack has a project frame -- a library-only stack has nowhere to show. */}
+          {props.appErrorSrc && (
+            <button type="button" onClick={() => props.onShowInSource(props.appErrorSrc as string)}>Show in source</button>
+          )}
           <button type="button" onClick={props.onDismissAppError}>Dismiss</button>
         </div>
       )}

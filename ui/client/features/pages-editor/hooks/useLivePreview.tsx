@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { previewFrameStyle, previewSizeReadout } from '../domain/PreviewFrameStyle';
 import { resolvePreviewSelection } from '../domain/PreviewSelection';
 import { isLocalPreviewUrl, normalizePreviewUrl } from '../domain/PreviewUrl';
+import { openSourceTargetFromCxSrc } from '../domain/OpenSource';
 import { createIframePreviewSource } from '../services/PreviewSource';
 import { probePreview } from '../services/PreviewReachability';
+import { requestOpenSource } from '../services/OpenSourceRequest';
 import type { LivePreviewView, PreviewReach } from '../domain/LivePreviewView';
 import type { PagesEditorNode } from '../types';
 import { useFullScreenPreview } from './useFullScreenPreview';
@@ -106,6 +108,13 @@ export function useLivePreview({ roots, feature, file, onSelectNode }: Args) {
     if (url) probe(url);
   }, [url, probe]);
 
+  // #558: "Show in source" -- the src is already a data-cx-src-shaped "file:line:col" string (the
+  // bridge's own stack resolution); parse it and ask the (separately mounted) Navigator to open it.
+  const showInSource = useCallback((src: string) => {
+    const target = openSourceTargetFromCxSrc(src);
+    if (target) requestOpenSource(target);
+  }, []);
+
   const view = useMemo<LivePreviewView>(
     () => ({
       draft,
@@ -118,7 +127,9 @@ export function useLivePreview({ roots, feature, file, onSelectNode }: Args) {
       reach,
       plugin: signals.plugin,
       appError: signals.appError,
+      appErrorSrc: signals.appErrorSrc,
       onDismissAppError: signals.dismissAppError,
+      onShowInSource: showInSource,
       onRetry: retry,
       onLoadAnyway: () => setReach('up'),
       size: sizing.size,
@@ -132,7 +143,7 @@ export function useLivePreview({ roots, feature, file, onSelectNode }: Args) {
       onExitFullScreen: full.exit,
       fullScreenRef: full.triggerRef,
     }),
-    [draft, url, message, connect, disconnect, reach, retry, sizing, full, signals.plugin, signals.appError, signals.dismissAppError],
+    [draft, url, message, connect, disconnect, reach, retry, sizing, full, signals.plugin, signals.appError, signals.appErrorSrc, signals.dismissAppError, showInSource],
   );
 
   return { draft, setDraft, url, message, frameRef, connect, connectTo, release, disconnect, fullScreen: full.fullScreen, view };

@@ -196,6 +196,10 @@ export type NavView = {
   references: NavReference[];
   name?: string;
   relation?: NavRelation;
+  /** #558 -- set when this view was opened at a known position (the live preview's "Show in source"),
+   * not by following a reference; null/absent otherwise. */
+  line?: number | null;
+  column?: number | null;
 };
 
 /** One hop in the trail: what was clicked, how it relates to the hop before, and what it shows. */

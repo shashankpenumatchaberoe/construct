@@ -87,7 +87,7 @@ import { handleLogs } from './logBuffer.mjs';
 import { unitsIndex, unitSummary, featuresIndex, featureSummary } from './unitsApi.mjs';
 import { buildPalette } from '../../../packages/engine/palette.mjs';
 import { readPageSource } from './pageSource.mjs';
-import { viewPage, openReference, viewProjectFile } from './projectNav.mjs';
+import { viewPage, openReference, openSourceLocation, viewProjectFile } from './projectNav.mjs';
 import { featureFlow, flowFilePaths } from './flowApi.mjs';
 import { describePageChange, adoptOwnWrite, pageChangeTracker } from './pageChanges.mjs';
 import { listWorkflowFeatures, listWorkflowFiles, readWorkflowMachines, readWorkflowNarrative, editWorkflowFile } from './workflowsViewer.mjs';
@@ -788,10 +788,13 @@ app.get('/api/nav/file', (req, res) => {
   }
 });
 
+// #558: two shapes -- `{ from, ref, start }` follows a resolved reference (the reference trail); `{ file,
+// line, column }` opens a bare file at a known position with no reference name (the live preview's
+// "Show in source" button, which already has the exact location from the app's own error stack).
 app.post('/api/nav/open', (req, res) => {
   try {
-    const { from, ref, start } = req.body || {};
-    res.json(openReference(currentRoot(), from, ref, start));
+    const { from, ref, start, file, line, column } = req.body || {};
+    res.json(typeof file === 'string' && file ? openSourceLocation(currentRoot(), file, line, column) : openReference(currentRoot(), from, ref, start));
   } catch (e) {
     handlePagesEditorError(res, e);
   }

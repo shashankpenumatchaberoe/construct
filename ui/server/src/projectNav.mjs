@@ -178,3 +178,20 @@ export function openReference(root, from, ref, start) {
   if (!targetReal) throw new PagesEditorError(`"${ref}" does not lead to a file inside the project.`, { status: 404 });
   return buildView(root, targetReal, { name: ref, relation: pick.relation });
 }
+
+/**
+ * Open a bare project file at a known position (#558): unlike `openReference`, there is no `from` file
+ * and no reference name to derive a target from -- the caller (the live preview's "Show in source"
+ * button) already has the exact project file and position, resolved client-side from the framed app's
+ * own error stack / `data-cx-src` annotation. Same containment as every other nav read here:
+ * `resolveProjectFile`'s real-path-inside-root, non-node_modules, source-extension guard.
+ */
+export function openSourceLocation(root, file, line, column) {
+  const real = resolveProjectFile(root, file);
+  if (!real) throw new PagesEditorError('That file is not a source file inside the project.', { status: 400 });
+  const pos = {
+    line: Number.isInteger(line) && line > 0 ? line : null,
+    column: Number.isInteger(column) && column > 0 ? column : null,
+  };
+  return buildView(root, real, pos);
+}

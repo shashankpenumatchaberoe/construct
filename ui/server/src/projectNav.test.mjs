@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { viewPage, openReference, resolveProjectFile } from './projectNav.mjs';
+import { viewPage, openReference, openSourceLocation, resolveProjectFile } from './projectNav.mjs';
 import { PagesEditorError } from './pagesEditor.mjs';
 import { serverLog } from './logBuffer.mjs';
 import { makeTempDir } from '../../../test-utils/tmpdir.mjs';
@@ -160,4 +160,31 @@ test('pages scope: viewPage refuses anything outside pages/', () => {
   const { root } = makeProject();
   assert.throws(() => viewPage(root, 'catalog', '../components/Badge.tsx'), PagesEditorError);
   assert.throws(() => viewPage(root, 'catalog', path.join(os.tmpdir(), 'x.tsx')), PagesEditorError);
+});
+
+// #558: the live preview's "Show in source" button already knows the exact file/line/col (from the
+// framed app's own error stack), so opening it needs no `from` file or reference name to derive a
+// target from -- just the same containment every other nav read here goes through.
+test('openSourceLocation opens a bare project file and carries the given position', () => {
+  const { root } = makeProject();
+  const v = openSourceLocation(root, 'features/catalog/components/Badge.tsx', 3, 7);
+  assert.equal(v.path, 'features/catalog/components/Badge.tsx');
+  assert.match(v.source, /export default function Badge/);
+  assert.equal(v.line, 3);
+  assert.equal(v.column, 7);
+});
+
+test('openSourceLocation drops a non-positive-integer line/column instead of passing it through', () => {
+  const { root } = makeProject();
+  for (const [line, column] of [[0, 1], [-1, 1], [1.5, 1], ['12', 1], [undefined, undefined]]) {
+    const v = openSourceLocation(root, 'features/catalog/components/Badge.tsx', line, column);
+    assert.equal(v.line, null, JSON.stringify([line, column]));
+  }
+});
+
+test('openSourceLocation refuses the same paths openReference refuses: outside the root, node_modules, symlink escape, non-source', () => {
+  const { root, outside } = makeProject();
+  for (const file of ['../secret.ts', path.join(outside, 'secret.ts'), 'node_modules/pkg/index.js', 'features/catalog/components/EvilLink.ts', 'architecture.yml', '']) {
+    assert.throws(() => openSourceLocation(root, file, 1, 1), PagesEditorError, `openSourceLocation(${JSON.stringify(file)})`);
+  }
 });

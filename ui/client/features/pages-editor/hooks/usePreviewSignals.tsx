@@ -16,15 +16,17 @@ export const PLUGIN_WAIT_MS = 6000;
 export function usePreviewSignals(source: PreviewSource | null, active: boolean) {
   const [ready, setReady] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+  const [appErrorSrc, setAppErrorSrc] = useState<string | null>(null);
   const [waited, setWaited] = useState(false);
 
   useEffect(() => {
     setReady(false);
     setAppError(null);
+    setAppErrorSrc(null);
     setWaited(false);
     if (!source) return undefined;
     return source.onSignal((signal) => {
-      if (signal.type === 'ready') { setReady(true); setAppError(null); } else setAppError(signal.message);
+      if (signal.type === 'ready') { setReady(true); setAppError(null); setAppErrorSrc(null); } else { setAppError(signal.message); setAppErrorSrc(signal.src); }
     });
   }, [source]);
 
@@ -35,6 +37,6 @@ export function usePreviewSignals(source: PreviewSource | null, active: boolean)
   }, [source, active, ready]);
 
   const plugin: PreviewPlugin = !source ? 'unknown' : ready ? 'on' : waited ? 'off' : 'waiting';
-  const dismissAppError = useCallback(() => setAppError(null), []);
-  return { plugin, appError, dismissAppError };
+  const dismissAppError = useCallback(() => { setAppError(null); setAppErrorSrc(null); }, []);
+  return { plugin, appError, appErrorSrc, dismissAppError };
 }

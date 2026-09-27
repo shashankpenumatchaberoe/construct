@@ -6,7 +6,8 @@ import { unlinkedReferences } from '../domain/CodeLinks';
 import { canBack, canForward } from '../domain/TrailAvailability';
 import { foldTrail } from '../domain/TrailFold';
 import { currentStep } from '../domain/TrailSteps';
-import { getNavPage, openNavReference } from '../services/ReferenceNavApi';
+import { getNavPage, openNavReference, openNavSource } from '../services/ReferenceNavApi';
+import { subscribeOpenSource } from '../services/OpenSourceRequest';
 import type { NavReference, NavView } from '../types';
 import { initialReferenceNavigation, referenceNavigationReducer } from '../workflows/ReferenceNavigation';
 import type { ReferenceNavigationAction } from '../workflows/ReferenceNavigation';
@@ -74,6 +75,18 @@ export function useReferenceTrail(feature: string, file: string, contentHash: st
   const select = useCallback((index: number) => dispatch({ type: 'GOTO', index }), []);
   useTrailShortcuts(canBack(trail), canForward(trail), back, forward);
 
+  // #558: the live preview's "Show in source" -- opens a bare file at a known position as a new trail
+  // step, the same way following a reference does, but with no reference name to resolve a target from.
+  const openSource = useCallback((file: string, line: number | null, column: number | null) => {
+    openNavSource(file, line, column)
+      .then((view) => {
+        if (typeof view.source !== 'string') dispatch({ type: 'HOP_FAILED', error: view.error || `Could not open ${file}.` });
+        else dispatch({ type: 'FOLLOWED', step: { name: file, relation: view.relation ?? null, view } });
+      })
+      .catch((e: Error) => dispatch({ type: 'HOP_FAILED', error: e.message }));
+  }, []);
+  useEffect(() => subscribeOpenSource(({ file, line, column }) => openSource(file, line, column)), [openSource]);
+
   return {
     steps: trail.steps,
     index: trail.index,
@@ -84,6 +97,7 @@ export function useReferenceTrail(feature: string, file: string, contentHash: st
     error: state.error,
     hopError: state.hopError,
     follow,
+    openSource,
     back,
     forward,
     select,

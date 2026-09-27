@@ -25,7 +25,11 @@ export type LivePreviewView = {
   /** Plugin state and the app's last uncaught error (the spec's "Click-to-source is off" and "App error" cards). */
   plugin: PreviewPlugin;
   appError: string | null;
+  /** #558 -- the error's stack's top project frame, `data-cx-src`-shaped ("file:line:col"), or null when
+   * the stack has no project frame (a library-only stack): the "Show in source" button shows only then. */
+  appErrorSrc: string | null;
   onDismissAppError: () => void;
+  onShowInSource: (src: string) => void;
   /** Device size picker: the chosen id, the options, and the change handler. */
   size: string;
   sizes: { id: string; label: string; title: string }[];
