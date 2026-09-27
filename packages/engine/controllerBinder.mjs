@@ -16,7 +16,7 @@ import path from 'node:path';
 import { ts, parseTsSource as parseTs, findNode } from '../../packages/ast/index.mjs';
 import { loadConfig } from '../core/config.mjs';
 import { write } from '../core/fs.mjs';
-import { selfCheck, pascalCase } from '../core/generators.mjs';
+import { selfCheck, pascalCase, ensureFeatureExists } from '../core/generators.mjs';
 import { validateEnvelope } from './envelope.mjs';
 import { ConstructError, EXIT_CODES } from '../core/diagnostics.mjs';
 
@@ -199,6 +199,12 @@ export function generateController(root, name, feature, opts = {}) {
   const cap = pascalCase(name, 'Controller');
   const { pagePropsFile, hookFile, propsTypeName, hookName } = resolveSourceFiles(root, name, feature, opts.envelope);
 
+  // #677: a feature that doesn't exist yet at all is scaffolded first (same
+  // as every other create.* flow) -- it still refuses just below, since
+  // --bind's own prerequisite (an already-generated page/hook) is a
+  // different, already-clear requirement this doesn't create, but the
+  // feature itself never silently stays a bare, unscaffolded folder.
+  ensureFeatureExists(root, feature);
   if (!fs.existsSync(pagePropsFile)) throw usageError(`PageProps file not found: ${pagePropsFile} (run \`construct create page ... --from\` first).`);
   if (!fs.existsSync(hookFile)) throw usageError(`Hook file not found: ${hookFile} (generate the feature's hook first).`);
   const pageFile = path.join(path.dirname(pagePropsFile), `${cap}Page.tsx`);

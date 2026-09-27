@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { makeLineSource } from './line-source.mjs';
-import { createFeature, generateLayer, generateVertical, layerFromGeneratedFile, fillGeneratedFile } from './generators.mjs';
+import { createFeature, ensureFeatureExists, generateLayer, generateVertical, layerFromGeneratedFile, fillGeneratedFile } from './generators.mjs';
 import { generateServiceFromSpec, resolveSchemaEmit } from './service-generator.mjs';
 import { generateShapeLayer, generateShapeVertical } from './shapes.mjs';
 import { ensureGeneratedDependencies } from './generated-dependencies.mjs';
@@ -2114,9 +2114,11 @@ export async function importRouteWizard(ask, seedRoute, { planAnalysis = 'claude
   const config = loadConfig(root);
   const featuresRoot = config.features?.root || 'features';
   const framework = config.project?.framework || 'nextjs';
-  const featureDir = path.join(root, featuresRoot, featureName);
-  if (!fs.existsSync(featureDir)) {
-    createFeature(root, featureName);
+  // #677: was an inline `if (!fs.existsSync(featureDir)) { createFeature(...); ... }` --
+  // functionally the same directory check generators.mjs's `ensureFeatureExists` now shares with
+  // every other create.* flow, so this wizard uses that one function instead of its own duplicate
+  // of the same logic. "never touches it if it does" still holds for an already-real feature.
+  if (ensureFeatureExists(root, featureName)) {
     console.log(`(feature "${featureName}" didn't exist yet — created it)`);
   }
 

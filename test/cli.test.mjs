@@ -399,6 +399,45 @@ test('import without --from exits with USAGE_ERROR', () => {
   assert.match(res.stderr, /Usage: construct import/);
 });
 
+// #677 sweep: import.unit/import.plan are fixed transitively -- importVertical scaffolds via
+// generateVertical, which calls generateLayer per layer, which now calls generators.mjs's
+// ensureFeatureExists (05fa49c). Confirms that holds for the CLI end to end, not just in theory.
+test('import <name> --feature <missing> scaffolds the feature first (fixed transitively via generateVertical/generateLayer) (#677)', () => {
+  const dir = emptyProjectDir();
+  const sourceFile = path.join(dir, 'OldFile.tsx');
+  fs.writeFileSync(sourceFile, 'export function old() { return true; }\n');
+  const res = run(['import', 'Foo', '--feature', 'legacy', '--layers', 'domain,hook', '--from', sourceFile], dir);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'legacy', 'index.ts')), true);
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'legacy', 'types.ts')), true);
+  const validateRes = run(['validate', '--format', 'json'], dir);
+  const violations = JSON.parse(validateRes.stdout).violations;
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), []);
+});
+
+test('import --plan into a missing feature scaffolds it too (#677)', () => {
+  const dir = emptyProjectDir();
+  const sourceFile = path.join(dir, 'OldFile.tsx');
+  fs.writeFileSync(sourceFile, 'export function old() { return true; }\n');
+  const planPath = path.join(dir, 'plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      feature: 'legacy',
+      units: [
+        { name: 'Foo', layers: ['domain'], from: sourceFile },
+        { name: 'Bar', layers: ['service'], from: sourceFile },
+      ],
+    }),
+  );
+  const res = run(['import', '--plan', planPath], dir);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'legacy', 'index.ts')), true);
+  const validateRes = run(['validate', '--format', 'json'], dir);
+  const violations = JSON.parse(validateRes.stdout).violations;
+  assert.deepEqual(violations.filter((v) => v.rule === 'SLICE-001'), []);
+});
+
 test('import --plan batch-scaffolds every unit in one command', () => {
   const dir = emptyProjectDir();
   run(['create', 'feature', 'checkout'], dir);
