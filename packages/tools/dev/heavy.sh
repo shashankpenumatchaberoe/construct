@@ -24,6 +24,11 @@
 # lock between checks so a waiter never holds the lock while it is not running
 # anything.
 #
+# macOS has no `flock` binary at all (#686). Where it is missing, the same lock/wait/
+# release contract is implemented with an atomic `mkdir` (a lock *file*'s create-if-
+# absent has a TOCTOU race that `mkdir` does not) holding a pid file, with the same
+# dead-pid-never-blocks-anyone liveness test used below for stale Construct temp dirs.
+#
 # Pruning is by owner liveness, never by age alone (#414). Every temp family
 # Construct creates carries the creating pid in its name
 # (construct-<family>-<pid>-<random>: tests, prhealth, testrun, txn, step,
@@ -42,6 +47,10 @@ POLL_SEC="${CONSTRUCT_HEAVY_POLL_SEC:-15}"
 TMP="${CONSTRUCT_HEAVY_TMP:-${TMPDIR:-/tmp}}"
 HOLDER="$LOCK.holder"
 EX_TEMPFAIL=75
+
+HAVE_FLOCK=1
+command -v flock >/dev/null 2>&1 || HAVE_FLOCK=0
+LOCKDIR="$LOCK.d" # the mkdir-based lock, used only when flock is unavailable (e.g. macOS)
 
 say() { echo "heavy.sh: $*" >&2; }
 
@@ -100,6 +109,39 @@ prune_stale() {
   done
 }
 
+# ---- locking -----------------------------------------------------------------------------------
+
+# Portable stand-in for `flock -w SECONDS 9` where flock does not exist: an atomic mkdir as the
+# mutex, a pid file inside it, and cleanup of a stale holder whose pid is provably gone (same test
+# as pid_gone/prune_stale above). Returns 0 once the directory is ours, 1 if SECONDS elapses first.
+mkdir_lock_wait() {
+  local wait_sec="$1" start holder_pid
+  start=$(date +%s)
+  while :; do
+    if mkdir "$LOCKDIR" 2>/dev/null; then
+      echo "$$" >"$LOCKDIR/pid" 2>/dev/null
+      return 0
+    fi
+    holder_pid=$(tr -cd '0-9' <"$LOCKDIR/pid" 2>/dev/null)
+    if [ -n "$holder_pid" ] && pid_gone "$holder_pid"; then
+      rm -rf "$LOCKDIR" 2>/dev/null # dead holder: never blocks anyone
+      continue
+    fi
+    [ "$(($(date +%s) - start))" -lt "$wait_sec" ] || return 1
+    sleep 0.2
+  done
+}
+
+# lk_wait SECONDS / lk_unlock: the one contract both lock implementations share. On the flock path
+# these are exactly `flock -w SECONDS 9` / `flock -u 9`; that path is otherwise untouched.
+lk_wait() {
+  if [ "$HAVE_FLOCK" = 1 ]; then flock -w "$1" 9; else mkdir_lock_wait "$1"; fi
+}
+
+lk_unlock() {
+  if [ "$HAVE_FLOCK" = 1 ]; then flock -u 9; else rm -rf "$LOCKDIR" 2>/dev/null; fi
+}
+
 # ---- entry ------------------------------------------------------------------------------------
 
 if [ "$#" -eq 0 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -115,13 +157,13 @@ free_mb() {
   if [ -r /proc/meminfo ]; then awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo; else echo ''; fi
 }
 
-exec 9>>"$LOCK"
+[ "$HAVE_FLOCK" = 1 ] && exec 9>>"$LOCK"
 started=$(date +%s)
 ram_deadline=$((started + RAM_WAIT_SEC))
 while :; do
   remaining=$((LOCK_WAIT_SEC - ($(date +%s) - started)))
   [ "$remaining" -gt 0 ] || remaining=0
-  if ! flock -w "$remaining" 9; then
+  if ! lk_wait "$remaining"; then
     holder=$(cat "$HOLDER" 2>/dev/null || echo "unknown (no $HOLDER)")
     say "could not get the heavy-job lock $LOCK within ${LOCK_WAIT_SEC}s. Held by: $holder."
     say "a dead holder releases the lock by itself, so that process is alive and stuck: look at it before killing it, or raise CONSTRUCT_HEAVY_LOCK_WAIT_SEC."
@@ -134,17 +176,17 @@ while :; do
   fi
   if [ "$free" -ge "$MIN_MB" ]; then break; fi
   if [ "$(date +%s)" -ge "$ram_deadline" ]; then
-    flock -u 9
+    lk_unlock
     say "gave up waiting for >= ${MIN_MB} MB free RAM after ${RAM_WAIT_SEC}s (have ${free} MB). Lock released; nothing was run."
     exit "$EX_TEMPFAIL"
   fi
   say "waiting for >= ${MIN_MB} MB free RAM (have ${free} MB)..."
-  flock -u 9 # never hold the lock while running nothing
+  lk_unlock # never hold the lock while running nothing
   sleep "$POLL_SEC"
 done
 
 printf 'pid %s since %s: %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >"$HOLDER" 2>/dev/null
-trap 'rm -f "$HOLDER" 2>/dev/null' EXIT
+trap 'rm -f "$HOLDER" 2>/dev/null; [ "$HAVE_FLOCK" = 1 ] || rm -rf "$LOCKDIR" 2>/dev/null' EXIT
 
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=${HEAP_MB}}"
 nice -n 10 "$@"
