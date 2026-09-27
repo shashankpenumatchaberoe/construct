@@ -16,6 +16,7 @@ import { createProcess } from '../packages/engine/processModel.mjs';
 import { openProcessStore } from '../packages/engine/processStore.mjs';
 import { createProcessEngine, materializeCommand, StepAborted } from '../packages/engine/processEngine.mjs';
 import { validateArchitecture } from '../packages/core/architecture-enforcer.mjs';
+import { topLevelState } from '../packages/engine/processMachine.mjs';
 
 /** A clock that ticks one second per call, so every assertion about
  * timestamps and ordering is exact rather than flaky. */
@@ -276,6 +277,93 @@ test('a failing step fails the process, skips what depended on it, and retry re-
   assert.equal(done.steps.find((s) => s.id === 'feature').attempts, 1, 'a completed step is not re-run by retry');
   assert.equal(done.steps.find((s) => s.id === 'domain').attempts, 2);
   assert.equal(done.steps.find((s) => s.id === 'fill').llm.calls, 2);
+});
+
+test('#415 a throw from commit() (e.g. ENOSPC building the shadow copy) fails the step exactly like a throwing executeStep, not an escaped engine failure', async () => {
+  // `validate` runs from inside `transaction.commit()`'s own try, so making
+  // it throw is the deterministic stand-in for a `cpSync`/`writeFileSync`
+  // blowing up while commit() builds the shadow tree to validate against —
+  // the exact failure #415 says used to run outside every step's try/catch.
+  const { engine, projectRoot } = harness({
+    plan: {
+      version: 1,
+      ticket: { source: 'text', title: 'Add the checkout feature' },
+      steps: [{
+        id: 'feature',
+        title: 'Create the checkout feature',
+        flow: 'create.feature',
+        args: { name: 'checkout' },
+        executor: 'deterministic',
+        touches: touching('features/checkout/index.ts'),
+      }],
+    },
+    validate: () => { throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' }); },
+    executeStep: async ({ transaction }) => {
+      transaction.writeFile(FILE_FOR.feature, '// feature\n');
+      return { ok: true, llm: null };
+    },
+  });
+
+  engine.start('p1');
+  const failed = await engine.settled('p1');
+
+  assert.equal(failed.state, 'failed');
+  assert.match(failed.steps[0].error, /ENOSPC/);
+  assert.equal(fs.existsSync(path.join(projectRoot, FILE_FOR.feature)), false, 'commit() threw before anything landed on disk');
+  assert.equal(failed.log.some((e) => e.provenance === 'warn' && e.message.includes('threw') && e.message.includes('ENOSPC')), true);
+});
+
+test('#415 an engine-level failure — a store save that throws once, at a point outside every step\'s own try/catch — still ends the process failed, not stuck saying "running" forever', async () => {
+  const { engine, store } = harness({
+    plan: {
+      version: 1,
+      ticket: { source: 'text', title: 'Add the checkout feature' },
+      steps: [{
+        id: 'feature',
+        title: 'Create the checkout feature',
+        flow: 'create.feature',
+        args: { name: 'checkout' },
+        executor: 'deterministic',
+        touches: touching('features/checkout/index.ts'),
+      }],
+    },
+    executeStep: async ({ transaction }) => {
+      transaction.writeFile(FILE_FOR.feature, '// feature\n');
+      return { ok: true, llm: null };
+    },
+  });
+
+  // The step's own completion save (inside runStep, guarded by its own
+  // try/catch) and the driver loop's own follow-up bookkeeping save
+  // (`persist(skipUnreachable(current(id)))` in processEngine.mjs's `loop()`,
+  // NOT inside any step's try/catch) persist an identical-looking record —
+  // "running", every step done. Let the first one (the step's own) through,
+  // and blow up the second (the loop's) exactly once, the way a state dir
+  // that goes unwritable mid-run would.
+  const realSave = store.save.bind(store);
+  let matches = 0;
+  let armed = true;
+  store.save = (record) => {
+    const allDoneWhileRunning = topLevelState(record.state) === 'running'
+      && record.steps.length > 0
+      && record.steps.every((s) => s.status === 'done' || s.status === 'skipped');
+    if (allDoneWhileRunning) matches += 1;
+    if (armed && allDoneWhileRunning && matches === 2) {
+      armed = false;
+      throw new Error('ENOSPC: no space left on device (test)');
+    }
+    return realSave(record);
+  };
+
+  engine.start('p1');
+  const settled = await engine.settled('p1');
+
+  assert.equal(settled.state, 'failed');
+  assert.match(settled.error, /ENOSPC/);
+  // Genuinely persisted (store.load() always reads fresh off disk, no cache),
+  // not just the in-memory record settled() happened to see.
+  store.save = realSave;
+  assert.equal(store.load('p1').state, 'failed');
 });
 
 test('a step whose output does not validate writes nothing and fails, using the real architecture enforcer', async () => {
