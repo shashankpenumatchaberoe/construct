@@ -40,6 +40,36 @@ function deadPid() {
   return r.pid;
 }
 
+/**
+ * A PATH with every real command available except `flock` (#686: macOS has no flock binary at
+ * all). Built by symlinking every executable found in the real PATH, skipping the name "flock",
+ * into one fresh directory -- so a script run with this PATH sees a normal-looking machine that
+ * merely lacks flock, not a machine missing everything else too.
+ */
+function pathWithoutFlock() {
+  const fakeBin = makeTempDir('heavy-noflock-bin-');
+  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name === 'flock') continue; // the one thing this PATH must not have
+      const target = path.join(fakeBin, entry.name);
+      if (fs.existsSync(target)) continue; // earlier PATH dir already claimed this name
+      try {
+        fs.symlinkSync(path.join(dir, entry.name), target);
+      } catch {
+        // unreadable/odd entry: skip it, it wasn't going to be flock anyway
+      }
+    }
+  }
+  return fakeBin;
+}
+
 const mk = (tmp, name, files = {}) => {
   const d = path.join(tmp, name);
   fs.mkdirSync(d, { recursive: true });
@@ -144,4 +174,78 @@ test('the RAM wait is bounded and the lock is released while waiting and after g
   assert.match(r.stderr, /gave up waiting for >= 999999999 MB free RAM after 1s .*Lock released/);
   // Another job can take the lock right away.
   assert.equal(spawnSync('flock', ['-n', env.CONSTRUCT_HEAVY_LOCK, 'true']).status, 0, 'the lock is free');
+});
+
+// ---- #686: no flock on the PATH (e.g. macOS) -- the mkdir fallback --------------------------
+
+test('flock missing: uses the mkdir lock dir instead, and cleans it up after the job', () => {
+  const { env } = sandbox();
+  const noFlock = { ...env, PATH: pathWithoutFlock() };
+  assert.equal(spawnSync('flock', ['-h'], { env: noFlock }).error?.code, 'ENOENT', 'sanity: flock really is hidden from this PATH');
+
+  const lockDir = `${env.CONSTRUCT_HEAVY_LOCK}.d`;
+  const r = run(['sh', '-c', `[ -d "${lockDir}" ] && echo lockdir-present; echo ran`], noFlock);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /lockdir-present/, 'the mkdir lock exists while the job runs');
+  assert.match(r.stdout, /ran/);
+  assert.equal(fs.existsSync(lockDir), false, 'lock dir removed once the job exits');
+});
+
+test('flock missing: still serializes two overlapping jobs (mutual exclusion via mkdir)', async () => {
+  const { tmp, env } = sandbox();
+  const noFlock = { ...env, PATH: pathWithoutFlock() };
+  const log = path.join(tmp, 'order.log');
+  const stamp = (label) => `echo "${label} $(date +%s%N)" >> "${log}"`;
+
+  const a = spawn('bash', [HEAVY, 'sh', '-c', `${stamp('a-start')}; sleep 0.5; ${stamp('a-end')}`], { env: noFlock });
+  await new Promise((res) => setTimeout(res, 150)); // let A actually take the lock first
+  const b = spawn('bash', [HEAVY, 'sh', '-c', `${stamp('b-start')}; ${stamp('b-end')}`], { env: noFlock });
+
+  const waitExit = (p) => new Promise((res) => p.on('exit', res));
+  const [codeA, codeB] = await Promise.all([waitExit(a), waitExit(b)]);
+  assert.equal(codeA, 0);
+  assert.equal(codeB, 0);
+  assert.equal(fs.existsSync(`${env.CONSTRUCT_HEAVY_LOCK}.d`), false, 'lock dir cleaned up after both jobs');
+
+  const lines = fs.readFileSync(log, 'utf8').trim().split('\n');
+  const idx = (label) => lines.findIndex((l) => l.startsWith(label));
+  assert.ok(idx('a-start') < idx('a-end') && idx('a-end') < idx('b-start'), `expected a-start, a-end, b-start, b-end in order, got: ${lines.join(' | ')}`);
+});
+
+test('flock missing: a lock dir left by a dead process is cleaned up immediately, never waited out', () => {
+  const { env } = sandbox({ CONSTRUCT_HEAVY_LOCK_WAIT_SEC: '20' });
+  const noFlock = { ...env, PATH: pathWithoutFlock() };
+  const lockDir = `${env.CONSTRUCT_HEAVY_LOCK}.d`;
+  fs.mkdirSync(lockDir);
+  fs.writeFileSync(path.join(lockDir, 'pid'), `${deadPid()}\n`);
+
+  const started = Date.now();
+  const r = run(['sh', '-c', 'echo ran'], noFlock);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /ran/);
+  assert.ok(Date.now() - started < 5000, `picked up the dead holder's lock right away, did not sit out the 20s wait (took ${Date.now() - started}ms)`);
+  assert.equal(fs.existsSync(lockDir), false, 'lock dir removed after the job');
+});
+
+test('flock missing: a lock held by another live process times out, names the holder, exit 75', async () => {
+  const { env } = sandbox({ CONSTRUCT_HEAVY_LOCK_WAIT_SEC: '1' });
+  const noFlock = { ...env, PATH: pathWithoutFlock() };
+  const lockDir = `${env.CONSTRUCT_HEAVY_LOCK}.d`;
+  const holderProc = spawn('sleep', ['30']); // a real, live pid to hold the lock, independent of heavy.sh
+  try {
+    await new Promise((res) => setTimeout(res, 50));
+    fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, 'pid'), `${holderProc.pid}\n`);
+    fs.writeFileSync(`${env.CONSTRUCT_HEAVY_LOCK}.holder`, 'pid 424242 since 2026-01-01T00:00:00Z: sleep forever\n');
+
+    const started = Date.now();
+    const r = run(['sh', '-c', 'echo must-not-run'], noFlock);
+    assert.equal(r.status, 75, r.stderr);
+    assert.ok(Date.now() - started < 15_000, 'gave up within the wait, not forever');
+    assert.doesNotMatch(r.stdout, /must-not-run/);
+    assert.match(r.stderr, /could not get the heavy-job lock .* within 1s/);
+    assert.match(r.stderr, /Held by: pid 424242 since 2026-01-01T00:00:00Z: sleep forever/);
+  } finally {
+    holderProc.kill('SIGKILL');
+  }
 });
