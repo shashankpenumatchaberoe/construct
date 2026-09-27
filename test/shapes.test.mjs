@@ -238,16 +238,27 @@ test('construct create: --shape writes the units, --format json lists them, and 
   assert.equal(unknown.error.code, 'USAGE_ERROR');
 });
 
-test('construct create prints one line per file and tells a project without the typed-contracts dependency', () => {
+test('construct create: --shape declares the typed-contracts dependency itself, through add.dependency, instead of just telling a person to (#678)', () => {
   const dir = project();
+  const pkgPath = path.join(dir, 'package.json');
+  const before = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  assert.ok(!before.dependencies?.['@line/construct-core'], 'a fresh init project does not declare it yet');
+  const otherDeps = { ...before.dependencies };
+
   const out = run(['create', 'layer', 'Products', '--feature', 'shop', '--layers', 'domain,service', '--shape', 'list'], dir).stdout;
   assert.match(out, /Created features\/shop\/domain\/Products\.domain\.ts/);
   assert.match(out, /Updated features\/shop\/types\.ts/);
-  assert.match(out, /add "@line\/construct-core" to your package\.json dependencies/);
-  const pkgPath = path.join(dir, 'package.json');
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  fs.writeFileSync(pkgPath, JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, '@line/construct-core': '^0.9.0' } }));
-  assert.doesNotMatch(run(['create', 'layer', 'Products', '--feature', 'shop', '--layers', 'domain', '--shape', 'list'], dir).stdout, /Note:/);
+  assert.match(out, /Added "@line\/construct-core": "\^0\.9\.0" to package\.json \(dependencies\)/);
+  assert.match(out, /restricted GitHub Packages registry, not the public npm registry/, 'says so rather than silently adding an unresolvable dependency (#678)');
+
+  const after = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  assert.equal(after.dependencies['@line/construct-core'], '^0.9.0', 'the plan/approval line, added via the same addDependency the add.dependency flow uses, not a hand-written note');
+  for (const [name, range] of Object.entries(otherDeps)) assert.equal(after.dependencies[name], range, `an already-present dependency (${name}) is left alone`);
+
+  // Idempotent: a second shaped generation into the same project neither re-adds nor re-announces it.
+  const again = run(['create', 'layer', 'Products', '--feature', 'shop', '--layers', 'domain', '--shape', 'list'], dir).stdout;
+  assert.doesNotMatch(again, /Added |Note:/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(pkgPath, 'utf8')).dependencies, after.dependencies, 'unchanged once the dependency is already declared');
 });
 
 // ------------------------------------------------------------------------------------------------- the Requirement chain

@@ -298,8 +298,14 @@ export function syncTouches(root, feature) {
   return { features: [feature], files: [{ path: `${featuresRoot}/${feature}/index.ts`, change: 'modify' }, { path: cruiser, change: fs.existsSync(path.join(root, cruiser)) ? 'modify' : 'create' }] };
 }
 
-/** The range of `@line/construct-core` a plan would add: this checkout's own version, caret. */
-function constructCoreRange() {
+/**
+ * The range of `@line/construct-core` a plan would add: this checkout's own version, caret. Exported so any other
+ * generator that introduces the same import (not just the wired shape flow) can add the identical line through
+ * `addDependency` without duplicating the read of this package's own version.
+ *
+ * @returns {string} A caret range, for example `^0.9.0`.
+ */
+export function constructCoreRange() {
   const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
   return `^${pkg.version}`;
 }

@@ -153,10 +153,13 @@ test('with a Playwright config the plan adds the browser flow and its run; the s
   assert.equal(detectPlaywright(dir), 'playwright.config.ts');
   const planned = planIn(dir);
   assert.equal(planned.ok, true, JSON.stringify(planned.errors));
-  assert.deepEqual(planned.plan.steps.slice(7).map((s) => `${s.id} ${s.flow} ${s.args.kind ?? ''} ${(s.dependsOn ?? []).join('+')}`), ['s8 add.dependency  ', 's9 sync  s2+s3+s4+s5+s6+s7', 's10 create.route  s7+s9', 's11 check.types  s2+s3+s4+s5+s6+s7+s8+s9+s10', 's12 create.proof render s2+s3+s4+s5+s6+s7+s8+s9+s10', 's13 test.proof  s12', 's14 create.proof playwright s2+s3+s4+s5+s6+s7+s8+s9+s10', 's15 test.run  s14+s13']);
-  assert.deepEqual(planned.plan.steps[13].args, { name: 'Products', feature: 'products', shape: 'list', entity: 'Product', fields: FIELDS, source: 'endpoint', kind: 'playwright', route: '/products' }, '#654: the browser flow opens the route the plan wired');
-  assert.deepEqual(planned.plan.steps[14].args, { feature: 'products', name: 'products--screen.spec.ts', area: 'generated' });
-  assert.deepEqual(planned.proof.verifiedBy, ['s13', 's15']);
+  // #678: project() generates the shape through the real CLI, which now declares @line/construct-core itself (add.dependency,
+  // wired into --shape); the project already has it by the time this plan is built, so dependencyOffer finds nothing missing
+  // and plans no add.dependency step here (see test/shapes.test.mjs for that flow's own coverage).
+  assert.deepEqual(planned.plan.steps.slice(7).map((s) => `${s.id} ${s.flow} ${s.args.kind ?? ''} ${(s.dependsOn ?? []).join('+')}`), ['s8 sync  s2+s3+s4+s5+s6+s7', 's9 create.route  s7+s8', 's10 check.types  s2+s3+s4+s5+s6+s7+s8+s9', 's11 create.proof render s2+s3+s4+s5+s6+s7+s8+s9', 's12 test.proof  s11', 's13 create.proof playwright s2+s3+s4+s5+s6+s7+s8+s9', 's14 test.run  s13+s12']);
+  assert.deepEqual(planned.plan.steps[12].args, { name: 'Products', feature: 'products', shape: 'list', entity: 'Product', fields: FIELDS, source: 'endpoint', kind: 'playwright', route: '/products' }, '#654: the browser flow opens the route the plan wired');
+  assert.deepEqual(planned.plan.steps[13].args, { feature: 'products', name: 'products--screen.spec.ts', area: 'generated' });
+  assert.deepEqual(planned.proof.verifiedBy, ['s12', 's14']);
   assert.deepEqual(planned.proof.playwright, { configured: true, config: 'playwright.config.ts', skipped: null });
   assert.deepEqual(planned.notes, ['The Products screen calls GET /api/products; that endpoint must exist in your app (a route handler or your backend), nothing in this plan creates it.'], 'the only note is what the endpoint source leaves to do by hand');
   assert.deepEqual(planTouches(planned.plan).files.filter((f) => f.path.includes('tests/')).map((f) => f.path), ['features/products/tests/generated/ProductsScreen.proof.test.ts', 'features/products/tests/generated/products--screen.spec.ts']);
@@ -177,7 +180,9 @@ test('a plan for a card without the shape has no proof; proof: false leaves a sh
   assert.deepEqual([plain.proof, plain.notes, plain.plan.steps.length], [null, [], 3]);
   const shaped = planIn(dir, { proof: false, wire: false });
   assert.deepEqual([shaped.proof, shaped.wiring, shaped.offers.map((o) => o.id), shaped.plan.steps.length], [null, null, ['q-source', 'q-states'], 7], 'the data source is asked whether or not the plan is wired');
-  assert.equal(planIn(dir, { proof: false }).plan.steps.length, 11, '#654 and #632: the dependency, sync, route and type-check steps are planned unless wire: false');
+  // #678: project() already declares @line/construct-core (the real CLI --shape call adds it), so no add.dependency step is
+  // planned here; sync, route and type-check still are, unless wire: false.
+  assert.equal(planIn(dir, { proof: false }).plan.steps.length, 10, '#654 and #632: the sync, route and type-check steps are planned unless wire: false');
 });
 
 test('proofStatus: the chain is complete only when every proof step is green or explicitly skipped', () => {

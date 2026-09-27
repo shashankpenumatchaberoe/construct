@@ -6,7 +6,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { makeLineSource } from './line-source.mjs';
 import { createFeature, generateLayer, generateVertical, layerFromGeneratedFile, fillGeneratedFile } from './generators.mjs';
 import { generateServiceFromSpec, resolveSchemaEmit } from './service-generator.mjs';
-import { generateShapeLayer, generateShapeVertical, hasTypedContractsDependency, TYPED_CONTRACTS_SPECIFIER } from './shapes.mjs';
+import { generateShapeLayer, generateShapeVertical } from './shapes.mjs';
+import { ensureGeneratedDependencies } from './generated-dependencies.mjs';
 import { write, ensureDir } from './fs.mjs';
 import { scaffoldProject } from './scaffold.mjs';
 import { loadConfig, findProjectRoot, DEFAULT_RULES, NEW_PROJECT_RULE_SEVERITIES, normalizeFramework } from './config.mjs';
@@ -226,6 +227,8 @@ function generateTests(args) {
   if (r.truncated) console.log('Note: a machine has more scenarios than the enumeration limit; only the first were generated.');
   const todo = r.files.filter((f) => f.needs.length).length;
   console.log(`${r.files.length} spec(s) for feature "${feature}" (${r.written.length} written, ${r.unchanged.length} unchanged; ${todo} pending a fixture), start URL ${r.route ?? 'TODO (no route reaches this feature)'} (${formatDuration(elapsedSeconds(t))})`);
+  // #678 sweep: a generated spec bare-imports @playwright/test; --dry-run writes nothing to check.
+  if (!args.includes('--dry-run') && r.written.length) reportGeneratedDependencies(root, r.written.map((f) => path.join(root, f)));
 }
 
 /**
@@ -247,9 +250,23 @@ function shapeRequestOf(args, name, feature) {
 /** One output line per file a shape wrote: `types.ts` is appended to (`Updated`), every other file is new (`Created`). */
 const shapeLine = (root, file, dt) => `${path.basename(file) === 'types.ts' ? 'Updated' : 'Created'} ${path.relative(root, file)} (${dt})`;
 
-/** After a shape wrote files that import the typed-contracts package, say so once when the project does not depend on it yet. */
-function printTypedContractsNote(root) {
-  if (!hasTypedContractsDependency(root)) console.log(`Note: the generated units import ${TYPED_CONTRACTS_SPECIFIER}: add "@line/construct-core" to your package.json dependencies before you build or type-check.`);
+/**
+ * After a generator writes files (#678: the shape flow's typed-contracts import, and any other generator that
+ * emits a bare import), declare whatever package.json does not already have via the existing `add.dependency`
+ * flow, and print what happened: one line per dependency actually added (idempotent -- an already-present one is
+ * left alone and prints nothing), then a note for anything this module could not place itself (see
+ * generated-dependencies.mjs's doc comment for why: no known version, or a dev-only tool `add.dependency` cannot
+ * yet target `devDependencies` for).
+ */
+function reportGeneratedDependencies(root, files) {
+  const { added, notes } = ensureGeneratedDependencies(root, files);
+  for (const dep of added) {
+    console.log(`Added ${dep.line} to package.json (dependencies): the generated units import it. Nothing is installed: run your package manager.`);
+    // #678: @line/construct-core is not on the public npm registry (packages/core/package.json's publishConfig
+    // points at a restricted GitHub Packages registry) -- say so right where the line was just added, not just in the README.
+    if (dep.name === '@line/construct-core') console.log('  Note: @line/construct-core publishes to a restricted GitHub Packages registry, not the public npm registry -- see README "Typed contracts", "Installing @line/construct-core" for the supported install paths (org access + .npmrc, or vendor packages/core/typed-contracts/).');
+  }
+  for (const note of notes) console.log(`Note: ${note}`);
 }
 
 /**
@@ -276,6 +293,8 @@ function generateProofFiles(args) {
   if (result.skipped) console.log(`Skipped: ${result.skipped}`);
   else if (result.kind === 'render') console.log(`Needs ${result.needs.join(', ')} in the project (esbuild comes with tsx and with vite). Run: construct test proof ${request.feature}`);
   else console.log(`Run it against your running app: construct test run ${request.feature} --area generated`);
+  // #678 sweep: a playwright-kind proof bare-imports @playwright/test.
+  if (!result.skipped) reportGeneratedDependencies(root, result.files);
 }
 
 /** The result document of `create proof` for `--format json`: the files written (project-relative), the regions declared and why anything was skipped. */
@@ -489,7 +508,7 @@ export async function generate(args) {
     const files = generateShapeLayer(root, { ...shaped, layer });
     const dt = formatDuration(elapsedSeconds(t));
     for (const file of files) console.log(shapeLine(root, file, dt));
-    printTypedContractsNote(root);
+    reportGeneratedDependencies(root, files);
     return;
   }
   // Ticket 7.2 (#112): `construct create/generate page <name> --feature <f> --from
@@ -524,6 +543,8 @@ export async function generate(args) {
     const { file, events, stateFile } = generateWorkflow(root, name, feature, descriptor, { stateUnion: args.includes('--state-union') });
     console.log(`Created ${path.relative(root, file)} (${formatDuration(elapsedSeconds(t))}, ${events.length} event(s): ${events.join(', ') || 'none'})`);
     if (stateFile) console.log(`Created ${path.relative(root, stateFile)} (typed state union + exhaustive matcher)`);
+    // #678 sweep: the machine file bare-imports xstate the same way a shaped unit bare-imports @line/construct-core.
+    reportGeneratedDependencies(root, [file, stateFile].filter(Boolean));
     return;
   }
   // Ticket 7.4 (#114): `construct create/generate controller <name> --feature <f>
@@ -568,8 +589,12 @@ export async function generate(args) {
     const dt = formatDuration(elapsedSeconds(t));
     for (const file of files) console.log(`Created ${path.relative(root, file)} (${dt})`);
     const zodFile = files.find((f) => f.endsWith('zod.gen.ts'));
-    if (zodFile) console.log(`  Response schemas: check a service at its boundary with defineService('<Op>', fn, { schema: z<Op>Response }) from ${path.relative(root, zodFile)}.`);
-    else if (resolveSchemaEmit(root, schema)) console.log('  No response schemas written: the spec declares no response schema.');
+    if (zodFile) {
+      console.log(`  Response schemas: check a service at its boundary with defineService('<Op>', fn, { schema: z<Op>Response }) from ${path.relative(root, zodFile)}.`);
+      // #678: --schema can force the zod plugin even when the project does not declare zod (resolveSchemaEmit(root, true) skips the
+      // zodDeclared check); the emitted file bare-imports it, so declare it the same way the shape flow declares @line/construct-core.
+      reportGeneratedDependencies(root, [zodFile]);
+    } else if (resolveSchemaEmit(root, schema)) console.log('  No response schemas written: the spec declares no response schema.');
     else if (schema === 'auto') console.log('  Response schemas not written (zod is not in package.json); add zod, or pass --schema, to also write services/<name>/zod.gen.ts.');
     return;
   }
@@ -587,6 +612,8 @@ export async function generate(args) {
   } else {
     console.log(`Created ${path.relative(root, file)} (${formatDuration(scaffoldSeconds)})`);
   }
+  // #678 sweep: the plain workflow stub (and, with --llm, whatever a model wrote) can bare-import too (xstate for a workflow).
+  reportGeneratedDependencies(root, [file]);
 }
 
 // One line per generated file for a --llm fill (#144/#141): "Created +
@@ -638,7 +665,7 @@ async function generateVerticalSlice(args) {
       onLayer: ({ files, elapsedSeconds: dt }) => { for (const file of files) console.log(shapeLine(root, file, formatDuration(dt))); },
     });
     console.log(`Total: ${formatDuration(elapsedSeconds(totalStart))} (${written.length} file(s))`);
-    printTypedContractsNote(root);
+    reportGeneratedDependencies(root, written);
     return;
   }
   const llmI = args.indexOf('--llm');
@@ -663,6 +690,7 @@ async function generateVerticalSlice(args) {
     }
   }
   console.log(`Total: ${formatDuration(elapsedSeconds(totalStart))}`);
+  reportGeneratedDependencies(root, files);
 }
 
 function featureNames(root, config) {
@@ -1285,13 +1313,18 @@ async function createDocument(args) {
     const layers = args[li + 1].split(',').map((l) => l.trim()).filter(Boolean);
     const shaped = shapeRequestOf(args, name, feature);
     const files = shaped ? generateShapeVertical(root, shaped, layers) : generateVertical(root, name, feature, layers);
-    return { verb: 'create', kind: 'layer', feature, name, layers, ...(shaped ? { shape: shaped.shape } : {}), files: files.map((f) => path.relative(root, f)), attribution };
+    const deps = shaped ? ensureGeneratedDependencies(root, files) : null;
+    return { verb: 'create', kind: 'layer', feature, name, layers, ...(shaped ? { shape: shaped.shape } : {}), files: files.map((f) => path.relative(root, f)), ...(deps && (deps.added.length || deps.notes.length) ? { dependencies: deps } : {}), attribution };
   }
   const layer = args[0], name = args[1];
   if (!layer || !name || !feature) throw usageFail('Usage: construct generate <layer> <name> --feature <feature> [--openapi <spec>] [--llm <provider>]');
   const root = getRoot(args);
   const shaped = shapeRequestOf(args, name, feature);
-  if (shaped) return { verb: 'create', kind: 'single', feature, layer, name, shape: shaped.shape, files: generateShapeLayer(root, { ...shaped, layer }).map((f) => path.relative(root, f)), attribution };
+  if (shaped) {
+    const files = generateShapeLayer(root, { ...shaped, layer });
+    const deps = ensureGeneratedDependencies(root, files);
+    return { verb: 'create', kind: 'single', feature, layer, name, shape: shaped.shape, files: files.map((f) => path.relative(root, f)), ...(deps.added.length || deps.notes.length ? { dependencies: deps } : {}), attribution };
+  }
   return { verb: 'create', kind: 'single', feature, layer, name, files: [path.relative(root, generateLayer(root, layer, name, feature))], attribution };
 }
 
