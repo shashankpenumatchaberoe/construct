@@ -177,3 +177,58 @@ test('getSettings exposes a legacy llmProvider field mirroring importFill, for a
   updateSettings({ llmProviders: { importFill: 'claude' } });
   assert.equal(getSettings().llmProvider, getSettings().llmProviders.importFill);
 });
+
+// ---------------------------------------------------------------------------
+// #418: llmProviders persisted at <stateDir>/settings.json, so the choice
+// survives a server restart. Each case runs in a fresh child process (like
+// the #365 last-project test above) so it sees a fresh module rather than
+// this file's already-populated in-memory state.
+// ---------------------------------------------------------------------------
+
+async function runInFreshProcess(state, script) {
+  const { execFileSync } = await import('node:child_process');
+  return execFileSync(process.execPath, ['-e', script], { env: { ...process.env, CONSTRUCT_STATE_DIR: state }, encoding: 'utf8' });
+}
+
+test('#418: a capability provider set via updateSettings is read back by a fresh process from the same state dir', async () => {
+  const state = makeTempDir('settings-llm-persist-');
+  const setScript = `import('${new URL('./settings.mjs', import.meta.url).href}').then((m) => { m.updateSettings({ llmProviders: { createFill: 'claude' } }); console.log('done'); })`;
+  await runInFreshProcess(state, setScript);
+  assert.ok(fs.existsSync(path.join(state, 'settings.json')), 'settings.json must have been written');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(state, 'settings.json'), 'utf8')).llmProviders.createFill, 'claude');
+
+  const readScript = `import('${new URL('./settings.mjs', import.meta.url).href}').then((m) => console.log(JSON.stringify(m.getSettings().llmProviders)))`;
+  const out = await runInFreshProcess(state, readScript);
+  assert.equal(JSON.parse(out.trim()).createFill, 'claude');
+});
+
+test('#418: settings.json is re-validated against PROVIDERS on read — an unknown provider from a stale/hand-edited file is dropped, not trusted', async () => {
+  const state = makeTempDir('settings-llm-invalid-');
+  fs.writeFileSync(path.join(state, 'settings.json'), JSON.stringify({ llmProviders: { importFill: 'no-such-provider-anymore' } }));
+  const readScript = `import('${new URL('./settings.mjs', import.meta.url).href}').then((m) => console.log(JSON.stringify(m.getSettings().llmProviders)))`;
+  const out = await runInFreshProcess(state, readScript);
+  const providers = JSON.parse(out.trim());
+  assert.notEqual(providers.importFill, 'no-such-provider-anymore');
+  assert.equal(typeof providers.importFill, 'string');
+});
+
+test(
+  '#418: settings.json is re-validated against the #96 planAnalysis guardrail on read — a stale file naming ollama for planAnalysis is dropped',
+  { skip: !PROVIDERS.ollama },
+  async () => {
+    const state = makeTempDir('settings-llm-ollama-plan-');
+    fs.writeFileSync(path.join(state, 'settings.json'), JSON.stringify({ llmProviders: { planAnalysis: 'ollama' } }));
+    const readScript = `import('${new URL('./settings.mjs', import.meta.url).href}').then((m) => console.log(JSON.stringify(m.getSettings().llmProviders)))`;
+    const out = await runInFreshProcess(state, readScript);
+    assert.notEqual(JSON.parse(out.trim()).planAnalysis, 'ollama');
+  },
+);
+
+test('#418: a corrupt settings.json is ignored in favor of defaults, rather than crashing the server', async () => {
+  const state = makeTempDir('settings-llm-corrupt-');
+  fs.writeFileSync(path.join(state, 'settings.json'), '{ not valid json');
+  const readScript = `import('${new URL('./settings.mjs', import.meta.url).href}').then((m) => console.log(JSON.stringify(m.getSettings().llmProviders)))`;
+  const out = await runInFreshProcess(state, readScript);
+  const providers = JSON.parse(out.trim());
+  assert.equal(typeof providers.importFill, 'string');
+});

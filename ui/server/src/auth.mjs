@@ -26,6 +26,9 @@
 //   * The test-login escape hatch is a *login*, not a bypass — see
 //     `resolveAuthConfig` and `POST /auth/test-login` below.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { resolveStateDir } from '../../../packages/engine/processStore.mjs';
 
 export const SESSION_COOKIE = 'construct_session';
 export const STATE_COOKIE = 'construct_oauth_state';
@@ -163,6 +166,60 @@ export function parseAllowedLogins(raw) {
     .filter(Boolean);
 }
 
+const SESSION_SECRET_FILE = 'session-secret';
+
+/** `<stateDir>/session-secret` — where the generated secret lives when
+ * `CONSTRUCT_SESSION_SECRET` is not set (#418). */
+export function sessionSecretPath(stateDir) {
+  return path.join(stateDir, SESSION_SECRET_FILE);
+}
+
+/**
+ * The secret to sign sessions with when no `CONSTRUCT_SESSION_SECRET` is
+ * configured: read from `<stateDir>/session-secret` if it exists, else
+ * generated and stored there (#418, mitigating B12 in
+ * docs/AUDIT-2026-09-oss-and-spof.md). Two calls with the same `stateDir`
+ * return the same secret, so a server restart no longer signs everyone out
+ * as long as the state directory survives it.
+ *
+ * Refuses a file that is readable or writable by anyone but its owner —
+ * exactly like `ssh` refuses a group/world-readable private key — because
+ * trusting it would let another account on a shared machine forge sessions.
+ * An env-provided secret is never subject to this: it always wins, and this
+ * function is not called at all when one is set.
+ *
+ * Narrow, accepted race: two processes starting for the very first time
+ * against the same empty `stateDir` at the same instant can each generate
+ * and write a different secret; the last `writeFileSync` wins on disk, but
+ * the other process keeps the value it already generated in memory. This is
+ * no worse than today's "one random secret per process" and is expected to
+ * be hit essentially never (only ever on a state directory's first boot).
+ */
+export function loadOrCreatePersistedSecret(stateDir) {
+  const file = sessionSecretPath(stateDir);
+  let stat = null;
+  try {
+    stat = fs.statSync(file);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  if (stat) {
+    if ((stat.mode & 0o077) !== 0) {
+      throw new AuthConfigError(
+        `${file} is readable or writable by users other than its owner (mode ${(stat.mode & 0o777).toString(8)}). ` +
+          `Refusing to trust it as a session secret — like ssh refuses a group/world-readable private key. Fix it with: chmod 600 ${file}`,
+      );
+    }
+    const secret = fs.readFileSync(file, 'utf8').trim();
+    if (secret) return secret;
+    // Fall through: an empty/corrupt file is regenerated below rather than trusted or left unusable.
+  }
+  const secret = crypto.randomBytes(32).toString('hex');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(file, secret, { mode: 0o600 });
+  return secret;
+}
+
 /**
  * Resolve the whole auth posture from the environment, or throw
  * AuthConfigError for a configuration the server must not run with.
@@ -186,7 +243,10 @@ export function parseAllowedLogins(raw) {
  * or exposed on a real interface, fails loudly at startup instead of
  * silently running with a back door.
  */
-export function resolveAuthConfig(env = process.env, { host = '127.0.0.1', port = 4000, clientOrigin = 'http://localhost:3000' } = {}) {
+export function resolveAuthConfig(
+  env = process.env,
+  { host = '127.0.0.1', port = 4000, clientOrigin = 'http://localhost:3000', stateDir = resolveStateDir() } = {},
+) {
   const loopback = isLoopbackHost(host);
   const clientId = trimmed(env.CONSTRUCT_GITHUB_CLIENT_ID);
   const clientSecret = trimmed(env.CONSTRUCT_GITHUB_CLIENT_SECRET);
@@ -258,10 +318,11 @@ export function resolveAuthConfig(env = process.env, { host = '127.0.0.1', port 
   if (sessionSecretEnv && sessionSecretEnv.length < 16) {
     throw new AuthConfigError('CONSTRUCT_SESSION_SECRET must be at least 16 characters. Generate one with: openssl rand -hex 32');
   }
-  // No secret configured: a random one per process. Sessions then do not
-  // survive a restart, which is the correct failure mode (a re-login) and
-  // is reported at startup.
-  const sessionSecret = sessionSecretEnv || crypto.randomBytes(32).toString('hex');
+  // No secret configured: persisted at <stateDir>/session-secret (#418), so
+  // a restart from the same state directory does not sign everyone out. An
+  // env-provided secret always wins over the stored one.
+  const sessionSecretFile = sessionSecretEnv ? null : sessionSecretPath(stateDir);
+  const sessionSecret = sessionSecretEnv || loadOrCreatePersistedSecret(stateDir);
 
   const ttlHoursRaw = trimmed(env.CONSTRUCT_SESSION_TTL_HOURS);
   const ttlHours = ttlHoursRaw ? Number(ttlHoursRaw) : DEFAULT_SESSION_TTL_HOURS;
@@ -278,6 +339,7 @@ export function resolveAuthConfig(env = process.env, { host = '127.0.0.1', port 
     testUser,
     sessionSecret,
     ephemeralSecret: !sessionSecretEnv,
+    sessionSecretFile,
     sessionTtlMs: ttlHours * 60 * 60 * 1000,
     // `Secure` would make the cookie unusable over plain http on loopback,
     // which is exactly how this is developed; anywhere else it is on.
@@ -637,7 +699,10 @@ export function createAuth(config, deps = {}) {
       });
     }
     if (config.required && config.ephemeralSecret) {
-      lines.push({ level: 'warn', text: 'CONSTRUCT_SESSION_SECRET is not set — a random one was generated, so every restart signs everyone out. Set it to persist sessions.' });
+      lines.push({
+        level: 'warn',
+        text: `CONSTRUCT_SESSION_SECRET is not set — using a generated secret stored at ${config.sessionSecretFile}. Sessions survive a restart as long as that file does; set the env var instead to use your own.`,
+      });
     }
     return lines;
   }

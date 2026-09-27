@@ -17,7 +17,12 @@ SCHEME="${SCHEME:-http}"; WS=$([ "$SCHEME" = https ] && echo wss || echo ws)
 # on 443; the browser then talks to that origin only, never to :3000 / :4000 directly.
 if [ "${BEHIND_PROXY:-}" = 1 ]; then ORIGIN="$SCHEME://$PUBLIC_HOST"; API="$ORIGIN"; else ORIGIN="$SCHEME://$PUBLIC_HOST:3000"; API="$SCHEME://$PUBLIC_HOST:4000"; fi
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-export CONSTRUCT_SESSION_SECRET="${CONSTRUCT_SESSION_SECRET:-$(openssl rand -hex 32)}"
+# #418: do NOT mint a fresh CONSTRUCT_SESSION_SECRET on every launch — that
+# was the whole bug (every restart signed everyone out). Leave it unset and
+# the server persists one at <stateDir>/session-secret (mode 0600, refused
+# if that file is ever group/world-readable), reusing it on every future
+# restart from the same state directory. Set CONSTRUCT_SESSION_SECRET here
+# (or in CONSTRUCT_ENV_FILE) only if you want to pin your own instead.
 export CONSTRUCT_OAUTH_CALLBACK_URL="${CONSTRUCT_OAUTH_CALLBACK_URL:-$API/auth/callback}"
 echo "Callback URL to register on the OAuth app: $CONSTRUCT_OAUTH_CALLBACK_URL"
 # #365: the server opens projects only from ONE workspace folder and starts with no project open.
