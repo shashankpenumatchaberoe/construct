@@ -131,7 +131,7 @@ export function materializeCommand(step, { tmpDir } = {}) {
  *                                         — #291 supplies this. `llm` is required in the result:
  *                                         `null` for "no model was involved", `{ provider, calls }` otherwise.
  * @param {number} [options.maxConcurrent] processes running at once when `lanes` is not given. Default 1.
- * @param {{read?: number, write?: number}} [options.lanes] #417: split the one slot queue into two —
+ * @param {{read?: number, write?: number}} [options.lanes] (#417) split the one slot queue into two —
  *                                         `read` for `review.analyze`/`test.run` (never blocked by a
  *                                         running bot plan) and `write` for everything else (bot plans;
  *                                         parallel writers in one tree still collide, so this stays 1

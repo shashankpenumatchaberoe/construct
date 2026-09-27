@@ -209,6 +209,10 @@ export const PSEUDO_LAYERS = new Set(['types']);
  *  - additively extend the base layer's `canImport` via `addCanImport`.
  * New layer names not present in the base graph may also be introduced,
  * provided they declare both `pattern` and `canImport`.
+ *
+ * @param {Record<string, {pattern?: string, canImport: string[]}>} base The canonical base layer graph (e.g. from `layersForFramework`).
+ * @param {Record<string, {pattern?: string, canImport?: string[], addCanImport?: string[]}>} [overrides] The project's `layers:` override/extension from `architecture.yml`.
+ * @returns {Record<string, {pattern?: string, canImport: string[]}>} The merged layer graph (not yet validated; pass to `validateGraph`).
  */
 export function mergeLayers(base, overrides = {}) {
   /** @type {Record<string, {pattern?: string, canImport: string[]}>} */
@@ -233,6 +237,10 @@ export function mergeLayers(base, overrides = {}) {
  * and the graph (ignoring pseudo-layers and same-layer self-edges, which are
  * always permitted) must be acyclic. Throws a ConstructError naming the
  * exact bad edge/cycle on failure.
+ *
+ * @param {Record<string, {pattern?: string, canImport: string[]}>} layers The layer graph to validate (e.g. from `mergeLayers`).
+ * @returns {true} `true` when the graph is well-formed and acyclic.
+ * @throws {Error} A ConstructError naming the missing canImport array, unknown edge target, or cycle.
  */
 export function validateGraph(layers) {
   const names = new Set(Object.keys(layers));
@@ -303,7 +311,7 @@ export function normalizeLayers(raw, framework) {
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw usageError('layers in architecture.yml must be a mapping of layer name to { pattern, canImport }.');
   }
-  const merged = mergeLayers(base, raw);
+  const merged = mergeLayers(base, /** @type {Record<string, {pattern?: string, canImport?: string[], addCanImport?: string[]}>} */ (raw));
   validateGraph(merged);
   return merged;
 }

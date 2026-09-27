@@ -60,6 +60,7 @@ export function jsxAttributes(openingElement, source) {
  * @returns {{kind:'text'|'expression', value:string, start:number, end:number}[]} Content records in source order.
  */
 function jsxContent(node, source) {
+  /** @type {{kind:'text'|'expression', value:string, start:number, end:number}[]} */
   const content = [];
   for (const child of node.children ?? []) {
     if (child.type === 'JSXText') {
