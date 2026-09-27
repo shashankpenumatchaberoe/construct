@@ -43,6 +43,49 @@ test('jsxAttributes classifies every attribute kind', () => {
   assert.deepEqual(byId.get('n0').props.map((p) => [p.kind, p.name, p.index]), [['string', 'className', 0], ['spread', null, 1]]);
 });
 
+test('parseJsxTree lists plain text as a content record (#697)', () => {
+  const src = '<p>hello</p>';
+  const { roots } = parseJsxTree(src);
+  assert.deepEqual(roots[0].content, [{ kind: 'text', value: 'hello', start: 3, end: 8 }]);
+  assert.equal(src.slice(3, 8), 'hello');
+  assert.deepEqual(roots[0].children, []); // additive: element children unaffected
+});
+
+test('parseJsxTree lists an {expression} child as a content record, excluding the braces (#697)', () => {
+  const src = '<p>{user.name}</p>';
+  const { roots } = parseJsxTree(src);
+  assert.deepEqual(roots[0].content, [{ kind: 'expression', value: 'user.name', start: 4, end: 13 }]);
+  assert.equal(src.slice(4, 13), 'user.name');
+});
+
+test('parseJsxTree lists mixed text, expression and element children in source order (#697)', () => {
+  const src = '<p>Hi {user.name}! <b>bold</b> done.</p>';
+  const { roots } = parseJsxTree(src);
+  assert.deepEqual(roots[0].content.map((c) => [c.kind, c.value]), [
+    ['text', 'Hi '], ['expression', 'user.name'], ['text', '! '], ['text', ' done.'],
+  ]);
+  // every content value round-trips through its own start/end
+  for (const c of roots[0].content) assert.equal(src.slice(c.start, c.end), c.value);
+  // the <b> element is still a real element child, unaffected by content
+  assert.deepEqual(roots[0].children.map((c) => c.tag), ['b']);
+  assert.deepEqual(roots[0].children[0].content, [{ kind: 'text', value: 'bold', start: 22, end: 26 }]);
+});
+
+test('parseJsxTree skips whitespace-only text (documented choice) but keeps real text (#697)', () => {
+  const src = '<div>\n  <b>x</b>\n  <i>y</i>\n</div>';
+  const { roots } = parseJsxTree(src);
+  assert.deepEqual(roots[0].content, []); // only whitespace between <b> and <i>: skipped
+  assert.deepEqual(roots[0].children.map((c) => c.tag), ['b', 'i']); // element children unaffected
+
+  const single = parseJsxTree('<p> </p>');
+  assert.deepEqual(single.roots[0].content, []); // a lone space is whitespace-only too
+});
+
+test('parseJsxTree skips an empty {/* comment */} expression container (#697)', () => {
+  const { roots } = parseJsxTree('<p>{/* just a comment */}</p>');
+  assert.deepEqual(roots[0].content, []);
+});
+
 test('jsxNameToString handles identifier, member and namespaced names', () => {
   const { byId } = parseJsxTree('<a><Foo.Bar /><svg:rect /></a>');
   assert.deepEqual([...byId.values()].map((n) => n.tag), ['a', 'Foo.Bar', 'svg:rect']);
