@@ -450,11 +450,9 @@ test('rewireWireInSnippet moves a prop from one child to its sibling (#121)', ()
   const result = rewireWireInSnippet(WIRE_SNIPPET, { parentId: mainId, propName: 'title', fromChildId: cardId, toChildId: asideId });
   assert.equal(result.ok, true);
   assert.match(result.snippet, /<Card\s*\/>/);
-  // buildAttributeSnippet's existing self-closing-tag insertion logic (used
-  // unchanged here) doesn't add a space before `/>` when one already
-  // precedes the insertion point — same behavior applyAutoMap already
-  // relies on elsewhere, not new to this ticket.
-  assert.match(result.snippet, /<Aside title=\{title\}\/>/);
+  // buildAttributeSnippet's setAttributeText preserves the tag's existing space before `/>` when
+  // inserting a new attribute into a single-line self-closing tag (#696).
+  assert.match(result.snippet, /<Aside title=\{title\} \/>/);
 
   // The rewired snippet must still parse as a real, valid tree.
   const reparsed = parsePageTree(result.snippet);
