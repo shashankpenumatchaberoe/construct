@@ -62,6 +62,20 @@ export type TabHostProps = {
   onSelect: (id: string) => void;
   /** Shown when the region has no enabled tab. */
   empty?: ReactNode;
+  /** #683: the tablist renders elsewhere (RailSubTabs, stacked under the primary rail) instead
+   * of as this host's own header. The panel keeps rendering here, still labelled by a tab
+   * button that exists elsewhere in the DOM (same id scheme, `aria-labelledby` does not care
+   * where the referenced element lives). */
+  hideList?: boolean;
+};
+
+export type RailSubTabsProps = {
+  /** Accessible name of the tab list; also derives the id prefix shared with the TabHost panel
+   * this list is switching (must match that TabHost's own `label`). */
+  label: string;
+  tabs: ShellTab[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
 };
 
 // ---- Navigation ----------------------------------------------------------

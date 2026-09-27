@@ -114,6 +114,19 @@
 }
 .sh-rail--horizontal .sh-rail-link--active { border-top-color: var(--accent); }
 .sh-rail--horizontal .sh-rail-badge { position: absolute; top: 2px; right: 4px; margin: 0; min-width: 16px; padding: 0 3px; font-size: var(--fs-xs); }
+
+/* #683: the active screen's registered Browser-pane tabs (Features/Notes, ...), stacked directly
+ * beneath the primary rail in the same left column instead of a horizontal strip inside the
+ * Browser pane's own header. `.sh-rail-link` is reused as-is so these read as more rows of the
+ * same menu; `--sub` only tucks the label in a little to hint they belong to the row above. The
+ * rail's own `border-bottom` (`.sh-left-col--split .sh-rail`, just above this block's sibling)
+ * is the divider between the two sections -- this list adds none of its own above it. */
+/* The column's width does not actually shrink when the rail is collapsed (`.sh-left-col--split
+ * .sh-rail`'s `width: 100%` outranks `.sh-rail--collapsed`'s on specificity -- see shell-rail.spec.js,
+ * "collapsing it no longer narrows the rail's own footprint"), and these rows have no icon to fall
+ * back on the way a rail link does, so they keep showing their full label either way. */
+.sh-rail-subtabs { display: flex; flex-direction: column; }
+.sh-rail-link--sub { padding-left: calc(var(--sp-3) + 14px); min-height: 40px; }
 .sh-root--gate .main { flex: 1; }
 .sh-topnav-badge { min-width: 18px; padding: 0 5px; text-align: center; font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 999px; }
 .sh-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
