@@ -284,6 +284,22 @@ project:
 
 ## Typed contracts (allowlist enforcement)
 
+**Installing `@line/construct-core` (#678).** A generated unit imports its factories from
+`@line/construct-core/typed-contracts` (a real package specifier, proven against a real `tsc`
+in `test/typed-contracts-publish.test.mjs`), and `construct create layer --shape ...` (or any
+other generator that introduces it) now declares it in the project's `package.json` for you
+through the existing `add.dependency` flow — never installs, never touches an already-present
+entry. That line alone is not enough to `npm install` from outside this monorepo yet, though:
+`packages/core/package.json`'s `publishConfig` points at `https://npm.pkg.github.com` with
+`access: "restricted"`, the same as every other `@line/*` package here (`cli`, `mcp`, `studio`)
+— a private GitHub Packages registry scoped to this org, not the public npm registry. Until
+`@line/construct-core` is published somewhere publicly installable, a project outside this repo
+has two supported paths: (1) get GitHub Packages access from the owner and add a `.npmrc` line
+(`@line:registry=https://npm.pkg.github.com`) alongside an auth token, or (2) vendor
+`packages/core/typed-contracts/` directly — it ships as plain, uncompiled `.ts` sources with no
+build step (see the publish test above), so copying the directory into the project and pointing
+a local path/alias at it works without the registry at all.
+
 Most layer rules above are enforced two ways at once, not just one:
 
 - **Composition prevents** — `packages/core/typed-contracts/` gives each layer a
