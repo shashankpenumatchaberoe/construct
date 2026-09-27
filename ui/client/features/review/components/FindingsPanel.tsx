@@ -21,8 +21,11 @@ function Row({ row, mark, kind, onSelect }: { row: FindingRow; mark: string; kin
           <span className="rv-finding-title">{row.title}</span>
           {row.fix && (
             <span className="rv-fix" data-testid="review-finding-fix" data-available={row.fix.available ? 'yes' : 'no'}>
-              <strong>Fix:</strong> {row.fix.command ? <code>{row.fix.command}</code> : null}
-              {row.fix.available ? null : <span className="rv-fix-none"> No automated fix yet</span>}
+              {row.fix.available && row.fix.command ? (
+                <><strong>Fix:</strong> <code>{row.fix.command}</code></>
+              ) : (
+                <span className="rv-fix-none">No automated fix yet</span>
+              )}
             </span>
           )}
         </span>
