@@ -118,10 +118,14 @@ test('pure helpers: dev wins over start, a missing script is a refusal, addresse
 });
 
 test('findFreePort skips a busy port and never returns one the Cockpit reserves', async () => {
+  // The blocker binds port 0 (OS-assigned) rather than a hardcoded number: on this dev machine an
+  // unrelated long-lived process can hold a fixed port like 47500 as an ephemeral source port, which
+  // caused a false EADDRINUSE failure here (#729).
   const blocker = net.createServer();
-  await new Promise((r) => blocker.listen(47500, '127.0.0.1', r));
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  const busyPort = blocker.address().port;
   try {
-    assert.equal(await findFreePort(47500), 47501);
+    assert.equal(await findFreePort(busyPort), busyPort + 1);
   } finally {
     blocker.close();
   }
