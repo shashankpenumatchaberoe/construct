@@ -126,6 +126,19 @@ test('fixture soc-clean: no violations', () => {
   assert.deepEqual(r.violations, []);
 });
 
+// #699 -- checkSkeleton (SLICE-001) and checkOwnership (SOC-001) used to check every feature
+// against a hardcoded plural folder list (controllers/, services/, ...), completely ignoring
+// architecture.yml's `layers:` override -- this (not config.mjs's loadConfig alone) is the actual
+// mechanism behind Trace's reported 193 SOC-001 errors on a project with singular layer folders:
+// every file under e.g. features/*/service/ was "under unrecognized folder" and every feature was
+// "missing" controllers/workflows/hooks/services/pages/components even when it had their singular
+// equivalents. architecture-valid-singular-layers overrides those six layers to singular folder
+// names; both rules must now recognize them.
+test('fixture architecture-valid-singular-layers: layers: override is honored, zero SOC-001/SLICE-001 violations', () => {
+  const r = validateSeparationOfConcerns(path.join(fixturesRoot, 'architecture-valid-singular-layers'));
+  assert.deepEqual(r.violations.filter((v) => v.rule === 'SOC-001' || v.rule === 'SLICE-001'), []);
+});
+
 test('fixture soc-cross-feature: exactly one SLICE-002 violation fires', () => {
   const r = validateSeparationOfConcerns(path.join(fixturesRoot, 'soc-cross-feature'));
   assert.equal(r.violations.length, 1);

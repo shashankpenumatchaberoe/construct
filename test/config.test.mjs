@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadConfig, findProjectRoot, DEFAULT_RULES, DEFAULT_LAYERS, REACT_SPA_LAYERS, FRAMEWORKS, normalizeFramework, layersForFramework, DATA_LAYER_PROVIDERS, normalizeDataLayerProvider } from '../packages/core/config.mjs';
+import { loadConfig, findProjectRoot, DEFAULT_RULES, DEFAULT_LAYERS, REACT_SPA_LAYERS, FRAMEWORKS, normalizeFramework, layersForFramework, DATA_LAYER_PROVIDERS, normalizeDataLayerProvider, normalizeLayers } from '../packages/core/config.mjs';
 import { ConstructError, EXIT_CODES } from '../packages/core/diagnostics.mjs';
 import { makeTempDir } from '../test-utils/tmpdir.mjs';
 
@@ -41,6 +41,70 @@ test('loadConfig reads and normalizes project.framework: react-spa', () => {
   assert.equal(config.layers.route.pattern, 'src/App.tsx');
   // Everything else in the layer graph is unchanged from the nextjs shape.
   assert.deepEqual(config.layers.controller, DEFAULT_LAYERS.controller);
+});
+
+// #699 -- loadConfig used to unconditionally overwrite `layers` with layersForFramework(framework),
+// so a project's own `layers:` block in architecture.yml had NO effect on the config it actually
+// got back (only loadLayerGraph, used by the enforcer, ever merged it). These pin down the fix:
+// loadConfig's `layers` must reflect the override, exactly like loadLayerGraph's does.
+test('loadConfig merges a `layers:` override into config.layers instead of discarding it', () => {
+  const dir = tmpProject();
+  fs.writeFileSync(
+    path.join(dir, 'architecture.yml'),
+    'layers:\n  service:\n    pattern: "features/*/service/**"\n',
+  );
+  const config = loadConfig(dir);
+  assert.equal(config.layers.service.pattern, 'features/*/service/**');
+  // canImport wasn't touched by the override, so it must still be the framework default.
+  assert.deepEqual(config.layers.service.canImport, DEFAULT_LAYERS.service.canImport);
+  // Every other layer is untouched.
+  assert.deepEqual(config.layers.controller, DEFAULT_LAYERS.controller);
+});
+
+test('loadConfig\'s `layers:` override extends canImport additively via addCanImport, same as loadLayerGraph', () => {
+  const dir = tmpProject();
+  fs.writeFileSync(
+    path.join(dir, 'architecture.yml'),
+    'layers:\n  component:\n    addCanImport: [domain]\n',
+  );
+  const config = loadConfig(dir);
+  assert.ok(config.layers.component.canImport.includes('domain'));
+  assert.ok(config.layers.component.canImport.includes('component')); // original edges preserved
+});
+
+test('loadConfig rejects a non-mapping `layers:` value with a diagnostic naming the field', () => {
+  const dir = tmpProject();
+  fs.writeFileSync(path.join(dir, 'architecture.yml'), 'layers: "not-a-mapping"\n');
+  assert.throws(
+    () => loadConfig(dir),
+    (err) => {
+      assert.ok(err instanceof ConstructError);
+      assert.equal(err.exitCode, EXIT_CODES.USAGE_ERROR);
+      assert.match(err.message, /layers/);
+      return true;
+    },
+  );
+});
+
+test('loadConfig rejects a `layers:` override whose canImport edge points at a nonexistent layer', () => {
+  const dir = tmpProject();
+  fs.writeFileSync(
+    path.join(dir, 'architecture.yml'),
+    'layers:\n  service:\n    canImport: [nonexistent]\n',
+  );
+  assert.throws(
+    () => loadConfig(dir),
+    (err) => {
+      assert.ok(err instanceof ConstructError);
+      assert.match(err.message, /service -> nonexistent/);
+      return true;
+    },
+  );
+});
+
+test('normalizeLayers returns the framework base unchanged when `layers:` is absent', () => {
+  assert.deepEqual(normalizeLayers(undefined, 'nextjs'), DEFAULT_LAYERS);
+  assert.deepEqual(normalizeLayers(null, 'react-spa'), REACT_SPA_LAYERS);
 });
 
 test('loadConfig throws a ConstructError with a clear message for an unknown framework', () => {

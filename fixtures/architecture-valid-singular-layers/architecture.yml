@@ -1,0 +1,19 @@
+version: 1
+# #699 -- a project that names its layer folders in the singular (controller/ instead of
+# controllers/, etc.) instead of accepting the framework's plural defaults. Every entry below
+# overrides only `pattern`; `canImport` is deliberately omitted so each layer keeps its default
+# edges (mergeLayers, packages/core/config.mjs) -- this fixture exists to prove the override
+# itself (the folder name), not a custom import graph.
+layers:
+  controller:
+    pattern: "features/*/controller/**"
+  workflow:
+    pattern: "features/*/workflow/**"
+  hook:
+    pattern: "features/*/hook/**"
+  service:
+    pattern: "features/*/service/**"
+  page:
+    pattern: "features/*/page/**"
+  component:
+    pattern: "features/*/component/**"

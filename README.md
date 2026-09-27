@@ -247,6 +247,35 @@ Hook     → Workflow / Service / Domain
 
 This layer graph — and every rule in `rules:` — is identical regardless of `project.framework`. The one thing that differs per framework is what a **Route** physically is and how a **Controller** gets wired into it; see [Framework targets](#framework-targets).
 
+### Layer folder names
+
+Each feature-internal layer owns one folder under `features/<feature>/`, by default:
+
+| Layer | Default folder | Layer | Default folder |
+|---|---|---|---|
+| Controller | `controllers/` | Domain | `domain/` |
+| Workflow | `workflows/` | Page | `pages/` |
+| Hook | `hooks/` | Component | `components/` |
+| Service | `services/` | Expression | `expressions/` (optional/additive — see `EXPR-*` rules) |
+
+A project that already names these folders differently (singular, or any other convention) overrides them under `layers:` in `architecture.yml` — one entry per layer, by name, not by folder:
+
+```yaml
+layers:
+  service:
+    pattern: "features/*/service/**"   # was features/*/services/**
+```
+
+`pattern` fully replaces that layer's default glob; everything else about the layer (its `canImport` edges) is left alone unless given too. To extend (not replace) what a layer may import, use `addCanImport` instead of `canImport`:
+
+```yaml
+layers:
+  hook:
+    addCanImport: [controller]   # adds to hook's existing canImport, doesn't replace it
+```
+
+A `layers:` override is merged onto the framework's defaults (`layersForFramework`, `packages/core/config.mjs`) — it is never silently ignored, and both `construct validate` and every other command that reads `architecture.yml` (`loadConfig`) see the same, merged graph. A malformed override (an unknown `canImport` edge, a cycle) is rejected with a diagnostic naming the bad edge, not silently dropped. `fixtures/architecture-valid-singular-layers/` is a complete, checked-in worked example with six layers renamed to singular folders.
+
 ## Framework targets
 
 Construct's feature-internal architecture (everything from Controller down: Workflow/Service/Domain, Controller → Page → Component) never changes based on `project.framework` — only the **route layer** does, because that's the one place a real difference in how the two kinds of app actually route requests shows up.

@@ -4,7 +4,7 @@
 // makeViolation() from ./diagnostics.mjs with module: 'separation-of-concerns'.
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, DEFAULT_RULES } from './config.mjs';
+import { loadConfig, DEFAULT_RULES, DEFAULT_LAYERS } from './config.mjs';
 import { walk, rel } from './fs.mjs';
 import { makeViolation } from './diagnostics.mjs';
 import { exceptionApplies } from './exceptions.mjs';
@@ -12,20 +12,50 @@ import { parseToAst } from '../../packages/ast/index.mjs';
 import { isNonLayerPath } from './nonLayer.mjs';
 
 const ext = new Set(['.ts', '.tsx', '.js', '.jsx']);
-export const LAYER_FOLDERS = ['controllers', 'workflows', 'hooks', 'domain', 'services', 'pages', 'components'];
-const LAYER_FOLDER_SET = new Set(LAYER_FOLDERS);
 
-// #517 -- 'expressions' (#503's additive `expression` layer -- architecture-enforcer.mjs /
-// config.mjs's DEFAULT_LAYERS) is a real, recognized layer folder, but is deliberately NOT added
-// to LAYER_FOLDERS itself: that array also drives checkSkeleton's SLICE-001 "every feature must
-// have all of these folders" scaffold check, below, and requiring an expressions/ folder on every
-// pre-existing feature that has never opted into this optional layer would be exactly the
-// non-additive regression #500 phase 1 rules out (no existing project has one today). This set is
-// consulted ONLY by checkOwnership's "is this a known folder" SOC-001 check, so a feature that
-// does adopt expressions/ (e.g. via `construct refactor extract-expression`, #517) is recognized
+// Layer names (not folder names) that make up a normal feature slice's required folder set --
+// mirrors DEFAULT_LAYERS' feature-internal layers. `route` is excluded (it has no per-feature
+// folder: it lives outside features/, in app/ or src/App.tsx) and `expression` is excluded (see
+// RECOGNIZED_EXTRA_LAYER_NAMES below).
+const REQUIRED_LAYER_NAMES = ['controller', 'workflow', 'hook', 'domain', 'service', 'page', 'component'];
+
+// #517 -- 'expression' (#503's additive layer -- architecture-enforcer.mjs / config.mjs's
+// DEFAULT_LAYERS) is a real, recognized layer, but is deliberately NOT in REQUIRED_LAYER_NAMES:
+// that list also drives checkSkeleton's SLICE-001 "every feature must have all of these folders"
+// scaffold check, below, and requiring an expressions/ folder on every pre-existing feature that
+// has never opted into this optional layer would be exactly the non-additive regression #500
+// phase 1 rules out (no existing project has one today). This name is consulted ONLY by
+// checkOwnership's "is this a known folder" SOC-001 check, so a feature that does adopt an
+// expressions/ folder (e.g. via `construct refactor extract-expression`, #517) is recognized
 // without every other feature being forced to grow the folder too.
-const RECOGNIZED_EXTRA_FOLDERS = ['expressions'];
-const KNOWN_FOLDER_SET = new Set([...LAYER_FOLDERS, ...RECOGNIZED_EXTRA_FOLDERS]);
+const RECOGNIZED_EXTRA_LAYER_NAMES = ['expression'];
+
+/** Folder token (e.g. "controllers") a layer's pattern lives under, mirroring
+ * architecture-enforcer.mjs's own (unexported) layerFolder helper -- kept local to this file to
+ * avoid a cross-enforcer dependency; both derive the same regex from a layer's `pattern`. */
+function layerFolderOf(def) {
+  return def?.pattern?.match(/features\/\*\/([^/]+)\//)?.[1];
+}
+
+// Static, framework-default folder list -- exported for backward compatibility with anything
+// that read this constant before #699. checkSkeleton/checkOwnership below no longer use it
+// directly: they read the PROJECT's own (possibly `layers:`-overridden) layer graph instead, via
+// requiredFoldersOf/knownFoldersOf, so a project with e.g. a singular `service/` folder is
+// recognized instead of being forced into the plural framework default.
+export const LAYER_FOLDERS = REQUIRED_LAYER_NAMES.map((name) => layerFolderOf(DEFAULT_LAYERS[name])).filter(Boolean);
+
+/** The folders every feature slice of THIS project is expected to have, per its own layer graph
+ * (config.layers, which already reflects any `layers:` override in architecture.yml -- #699). */
+function requiredFoldersOf(config) {
+  return REQUIRED_LAYER_NAMES.map((name) => layerFolderOf(config.layers?.[name])).filter(Boolean);
+}
+
+/** Every folder name checkOwnership recognizes as a real architectural owner for THIS project:
+ * the required layers plus the optional/additive ones (RECOGNIZED_EXTRA_LAYER_NAMES), again read
+ * from the project's own (possibly overridden) layer graph. */
+function knownFoldersOf(config) {
+  return [...REQUIRED_LAYER_NAMES, ...RECOGNIZED_EXTRA_LAYER_NAMES].map((name) => layerFolderOf(config.layers?.[name])).filter(Boolean);
+}
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const stripExt = (p) => p.replace(/\.(tsx|ts|jsx|js)$/, '');
@@ -125,7 +155,7 @@ function resolveSpecifier(currentRelFile, spec, featuresRoot) {
 // ---------------------------------------------------------------------------
 function checkSkeleton(config, out, root, featuresRoot, name) {
   const featureDir = path.join(root, featuresRoot, name);
-  const missing = LAYER_FOLDERS.filter((f) => !fs.existsSync(path.join(featureDir, f)));
+  const missing = requiredFoldersOf(config).filter((f) => !fs.existsSync(path.join(featureDir, f)));
   if (!missing.length) return;
   pushViolation(config, out, {
     rule: 'SLICE-001',
@@ -394,6 +424,8 @@ function checkModuleCohesion(config, out, relFile, src) {
 
 function checkOwnership(config, out, root, featuresRoot, featureName) {
   const featureDir = path.join(root, featuresRoot, featureName);
+  const known = knownFoldersOf(config);
+  const knownSet = new Set(known);
   for (const p of walk(featureDir).filter((p) => ext.has(path.extname(p)) && !isNonLayerPath(root, p, config.nonLayer))) {
     const relToFeature = rel(featureDir, p);
     const segments = relToFeature.split('/');
@@ -407,20 +439,20 @@ function checkOwnership(config, out, root, featuresRoot, featureName) {
         line: 1,
         message: `File "${top}" sits directly in the feature root without a recognized role.`,
         why: 'Every responsibility needs an architectural owner.',
-        expected: [...LAYER_FOLDERS, ...RECOGNIZED_EXTRA_FOLDERS, 'shared/', 'index.ts', 'types.ts'],
+        expected: [...known, 'shared/', 'index.ts', 'types.ts'],
         suggestedFix: `Move ${relFull} into a known layer folder (e.g. ${featuresRoot}/${featureName}/domain/) or ${featuresRoot}/${featureName}/shared/.`,
       });
       continue;
     }
-    if (top === 'shared' || KNOWN_FOLDER_SET.has(top)) continue;
+    if (top === 'shared' || knownSet.has(top)) continue;
     pushViolation(config, out, {
       rule: 'SOC-001',
       file: relFull,
       line: 1,
       message: `File is under unrecognized folder "${top}/".`,
       why: 'Every responsibility needs an architectural owner (a known layer folder or an explicit shared/).',
-      expected: [...LAYER_FOLDERS, ...RECOGNIZED_EXTRA_FOLDERS, 'shared/'],
-      suggestedFix: `Move ${relFull} into one of ${[...LAYER_FOLDERS, ...RECOGNIZED_EXTRA_FOLDERS].join('/')} or ${featuresRoot}/${featureName}/shared/.`,
+      expected: [...known, 'shared/'],
+      suggestedFix: `Move ${relFull} into one of ${known.join('/')} or ${featuresRoot}/${featureName}/shared/.`,
     });
   }
 }
