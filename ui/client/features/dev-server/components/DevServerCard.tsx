@@ -12,6 +12,9 @@ export function DevServerCard({ view, error, ...handlers }: DevServerCardProps) 
       <p className="dev-server__title">{view.title}</p>
       <p className="dev-server__message" data-testid="dev-server-message">{view.message}</p>
       {error && <p className="status-error" role="alert">{error}</p>}
+      {view.networkWarning && (
+        <p className="dev-server__network-warning" role="alert" data-testid="dev-server-network-warning">{view.networkWarning}</p>
+      )}
       {view.command && (
         <p className="dev-server__command hint">
           Runs <code data-testid="dev-server-command">{view.command.display}</code>, which is <code data-testid="dev-server-script">{view.command.text}</code> in this project&apos;s package.json.

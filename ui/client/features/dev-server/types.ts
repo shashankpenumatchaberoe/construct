@@ -35,6 +35,10 @@ export type DevServerStatus = {
   pid: number | null;
   startedAt: string | null;
   failure: DevServerFailure | null;
+  /** Set once a running server also answers on one of this machine's own non-loopback addresses (#557): the
+   * Cockpit only hands the project's script PORT/HOST/HOSTNAME and frames a loopback address, so a framework
+   * that ignores those (Next.js binds 0.0.0.0 by default) is still reachable from the LAN while this says "Running". */
+  networkWarning: string | null;
   branch: string | null;
   branchKind: BranchKind | null;
   error?: string;
@@ -62,6 +66,8 @@ export type DevServerView = {
   /** First start for this command in this project: ask once, showing exactly what will run. */
   confirming: boolean;
   running: { url: string; port: number } | null;
+  /** "This server is also reachable from your network: <address>:<port>", only while running. */
+  networkWarning: string | null;
   canStart: boolean;
   canStop: boolean;
   canRestart: boolean;

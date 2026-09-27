@@ -19,6 +19,8 @@ const PORT_BASE = Number(process.env.E2E_DEVSERVER_PORT_BASE) || 0;
 // The fixture app: waits a moment before listening (so "Starting" is a state you can see), serves a page that
 // carries the REAL bridge (or not, in `no-plugin` mode) and a button that throws, and in `fixed` mode ignores
 // PORT and binds a hard-coded port (what a script that pins its port does, so a taken port really fails it).
+// In `lan` mode it binds every interface (0.0.0.0) instead of loopback — what a framework that ignores the
+// Cockpit's HOST/HOSTNAME env does (Next.js's own default) — to exercise the LAN-reachable warning (#557).
 const SERVER = `import http from 'node:http';
 import fs from 'node:fs';
 const mode = () => fs.readFileSync('mode.txt', 'utf8').trim();
@@ -28,9 +30,10 @@ const html = () => '<!doctype html><html><body style="font-family:sans-serif;pad
   + '<script>document.getElementById("boom").addEventListener("click", function () { throw new Error("Cannot read properties of undefined (reading \\'email\\')"); });</script>'
   + (mode() === 'no-plugin' ? '' : '<script>' + BRIDGE + '</script>') + '</body></html>';
 const port = mode() === 'fixed' ? Number(fs.readFileSync('fixed-port.txt', 'utf8')) : Number(process.env.PORT);
+const bindHost = mode() === 'lan' ? '0.0.0.0' : '127.0.0.1';
 const srv = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(html()); });
 srv.on('error', (e) => { console.error(e.message); process.exit(1); });
-setTimeout(() => srv.listen(port, '127.0.0.1', () => console.log('  Local:   http://localhost:' + port + '/')), 1200);
+setTimeout(() => srv.listen(port, bindHost, () => console.log('  Local:   http://localhost:' + port + '/')), 1200);
 process.on('SIGTERM', () => srv.close(() => process.exit(0)));
 `;
 
@@ -126,6 +129,8 @@ test.describe.serial('Live preview: Start dev server as a managed process (#378)
     expect([80, 443, 3000, 4000]).not.toContain(running.port);
     if (PORT_BASE) expect(running.port).toBeGreaterThanOrEqual(PORT_BASE);
     expect(running.branchKind).toBe('session');
+    // loopback only: no "reachable from your network" warning (#557; the lan-bound case is its own test below)
+    await expect(page.getByTestId('dev-server-network-warning')).toHaveCount(0);
 
     // --- the preview frames it by itself, and the Cockpit's plugin announced itself (so no "off" card) ---
     await expect(frame(page).locator('h1')).toHaveText('Hello from the dev server');
@@ -155,6 +160,21 @@ test.describe.serial('Live preview: Start dev server as a managed process (#378)
     await expect(card(page)).toHaveAttribute('data-state', 'not-running');
     await expect(page.locator('iframe[title="Live app preview"]')).toHaveCount(0);
     await expect.poll(() => canConnect(now.port), { timeout: 10_000 }).toBe(false);
+    expect((await status(request)).state).toBe('not-running');
+  });
+
+  test('a server also reachable from the network warns on the Running card, leaving the fix to the developer (#557)', async ({ page, request }) => {
+    test.setTimeout(60_000);
+    setMode('lan');
+    await openBillingPage(page);
+    await startIt(page);
+    await expect(card(page)).toHaveAttribute('data-state', 'running', { timeout: 30_000 });
+    const warning = page.getByTestId('dev-server-network-warning');
+    await expect(warning).toBeVisible({ timeout: 10_000 });
+    await expect(warning).toContainText('also reachable from your network');
+    expect((await status(request)).networkWarning).toMatch(/^This server is also reachable from your network: .+:\d+$/);
+    await page.getByTestId('dev-server-stop').click();
+    await expect(card(page)).toHaveAttribute('data-state', 'not-running');
     expect((await status(request)).state).toBe('not-running');
   });
 

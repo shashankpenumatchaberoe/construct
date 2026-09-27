@@ -22,7 +22,7 @@ process.env.CONSTRUCT_SESSION_SECRET = 'must-not-reach-project-code';
 
 const { app, devServer } = await import('./index.mjs');
 const { workspaceRoot } = await import('./workspace.mjs');
-const { parseLocalPort, looksLikePortBusy, busyPortFrom, readDevCommand, findFreePort, RESERVED_PORTS } = await import('./devServer.mjs');
+const { parseLocalPort, looksLikePortBusy, busyPortFrom, readDevCommand, findFreePort, RESERVED_PORTS, nonLoopbackAddresses } = await import('./devServer.mjs');
 
 // The fixture app: serves marker.txt (read on every request, so a checkout is visible without a restart) and
 // prints what a real dev server prints. It reports which Cockpit secrets it can see.
@@ -33,6 +33,18 @@ const srv = http.createServer((q, r) => r.end(fs.readFileSync('marker.txt', 'utf
 srv.on('error', (e) => { console.error(e.message); process.exit(1); });
 srv.listen(port, '127.0.0.1', () => {
   console.log('secret:' + (process.env.CONSTRUCT_SESSION_SECRET ?? 'none') + ' host:' + process.env.HOST);
+  console.log('  Local:   http://localhost:' + port + '/');
+});
+process.on('SIGTERM', () => srv.close(() => process.exit(0)));
+`;
+
+// #557: the same fixture, but bound to every interface (what a framework that ignores the Cockpit's HOST/HOSTNAME
+// env does, Next.js's own default) so the LAN-reachability probe has something to actually find.
+const FIXTURE_SERVER_ALL_INTERFACES = `import http from 'node:http';
+const port = Number(process.env.PORT);
+const srv = http.createServer((q, r) => r.end('all-interfaces'));
+srv.on('error', (e) => { console.error(e.message); process.exit(1); });
+srv.listen(port, '0.0.0.0', () => {
   console.log('  Local:   http://localhost:' + port + '/');
 });
 process.on('SIGTERM', () => srv.close(() => process.exit(0)));
@@ -154,6 +166,7 @@ test('start runs the project\'s own script and reaches running; the app answers 
   assert.ok(running.port >= 47300 && !RESERVED_PORTS.includes(running.port));
   assert.ok(running.pid > 0);
   assert.equal(await (await fetch(running.url)).text(), 'main-marker');
+  assert.equal(running.networkWarning, null, 'a server that only bound 127.0.0.1 is not reachable from the network (#557)');
 
   const logs = await (await call('GET', '/api/logs')).json();
   const text = logs.entries.filter((e) => e.source === 'dev-server').map((e) => e.text).join('\n');
@@ -281,6 +294,25 @@ test('a server that dies before it is ready is "failed" with what it said; a bad
     assert.equal((await r.json()).code, 'BAD_PORT');
   }
   assert.equal((await status()).state, 'not-running');
+});
+
+test('a server bound to every interface produces the LAN-reachable warning (#557); one on 127.0.0.1 only did not', async (t) => {
+  if (nonLoopbackAddresses().length === 0) { t.skip('no non-loopback address on this machine to prove reachability with'); return; }
+  fs.writeFileSync(path.join(projectDir, 'server.mjs'), FIXTURE_SERVER_ALL_INTERFACES);
+  setPackage({ dev: 'node server.mjs' });
+  await call('POST', '/api/dev-server/start', {});
+  const running = await until(async () => { const s = await status(); return s.state === 'running' && s.networkWarning ? s : null; }, 30_000, 'the network warning');
+  assert.match(running.networkWarning, /^This server is also reachable from your network: .+:\d+$/);
+  await call('POST', '/api/dev-server/stop', {});
+
+  // the earlier fixture, which binds only 127.0.0.1, never gets the warning (already asserted once above; a
+  // second, adjacent proof that switching the bind address is what flips it, not something stuck from before)
+  fs.writeFileSync(path.join(projectDir, 'server.mjs'), FIXTURE_SERVER);
+  await call('POST', '/api/dev-server/start', {});
+  await until(async () => { const s = await status(); return s.state === 'running' ? s : null; }, 30_000, 'running');
+  await new Promise((r) => setTimeout(r, 400)); // let the (negative) network probe finish before checking it stayed null
+  assert.equal((await status()).networkWarning, null);
+  await call('POST', '/api/dev-server/stop', {});
 });
 
 test('a project with no dev or start script is refused with a reason', async () => {

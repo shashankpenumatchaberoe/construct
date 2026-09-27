@@ -29,6 +29,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { containedProjectRoot, rootEscapesWorkspace } from './projectGuard.mjs';
 import { serverLog } from './logBuffer.mjs';
@@ -104,16 +105,44 @@ export async function findFreePort(from = DEFAULT_PORT_BASE, { reserved = RESERV
   return null;
 }
 
-/** Does something accept a connection on `port`? Returns the host that answered ('127.0.0.1' or '::1'), or null. */
-function answers(port) {
-  const tryHost = (host) => new Promise((resolve) => {
+/** Can something be reached by a TCP connect to `host`:`port`? */
+function canConnect(host, port) {
+  return new Promise((resolve) => {
     const s = net.connect({ port, host });
-    const done = (ok) => { s.destroy(); resolve(ok ? host : null); };
+    const done = (ok) => { s.destroy(); resolve(ok); };
     s.setTimeout(700, () => done(false));
     s.once('connect', () => done(true));
     s.once('error', () => done(false));
   });
+}
+
+/** Does something accept a connection on `port`? Returns the host that answered ('127.0.0.1' or '::1'), or null. */
+function answers(port) {
+  const tryHost = (host) => canConnect(host, port).then((ok) => (ok ? host : null));
   return tryHost('127.0.0.1').then((h) => h ?? tryHost('::1'));
+}
+
+/** This machine's own addresses other than loopback, on every interface (what a LAN peer could reach it by). */
+export function nonLoopbackAddresses() {
+  const out = [];
+  for (const infos of Object.values(os.networkInterfaces())) {
+    for (const info of infos ?? []) {
+      if (!info.internal && (info.family === 'IPv4' || info.family === 'IPv6')) out.push(info.address);
+    }
+  }
+  return out;
+}
+
+// #557: the Cockpit never invents a `--host` flag; it only hands the project's `scripts.dev` PORT/HOST/HOSTNAME
+// and frames a loopback address. A framework that ignores those and binds 0.0.0.0 anyway (Next.js's default) is
+// still reachable from the LAN while the card says "Running", so once the loopback probe answers, also try this
+// machine's own non-loopback addresses on the same port: the first that answers is worth a warning.
+/** The first of this machine's non-loopback addresses that also answers on `port`, or null. */
+async function networkReachableAddress(port) {
+  for (const address of nonLoopbackAddresses()) {
+    if (await canConnect(address, port)) return address; // addresses are few; this runs once, right after "running"
+  }
+  return null;
 }
 
 const liveChildren = new Set();
@@ -179,7 +208,7 @@ export function createDevServerService({
   /** Ports handed to a slot that has not necessarily bound yet, across ALL users: two concurrent starts never get the same one. */
   const claimed = new Set();
 
-  const blank = (root, login) => ({ root, login, state: 'not-running', child: null, exited: null, stopping: false, reported: null, port: null, url: null, pid: null, startedAt: null, failure: null, tail: [], timers: [], command: null, claimedPort: null });
+  const blank = (root, login) => ({ root, login, state: 'not-running', child: null, exited: null, stopping: false, reported: null, port: null, url: null, pid: null, startedAt: null, failure: null, networkWarning: null, tail: [], timers: [], command: null, claimedPort: null });
   const keyOf = (root, login = currentLogin()) => `${login}\u0000${root}`;
   const slotFor = (root) => { const k = keyOf(root); let s = slots.get(k); if (!s) { s = blank(root, currentLogin()); slots.set(k, s); } return s; };
   const bump = (login) => { versions.set(login, (versions.get(login) ?? 0) + 1); };
@@ -214,6 +243,7 @@ export function createDevServerService({
       pid: slot?.pid ?? null,
       startedAt: slot?.startedAt ?? null,
       failure: slot?.failure ?? null,
+      networkWarning: slot?.networkWarning ?? null,
       branch: branch.branch ?? null,
       // `session` = Cockpit created it (the dev server sees exactly what Cockpit saves, by construction);
       // `other` = pre-existing or hand-made (Cockpit can work on it, but does not control what else touches it).
@@ -268,6 +298,13 @@ export function createDevServerService({
         clearTimers(slot);
         bump(slot.login);
         say(slot, 'info', `Dev server is running at ${slot.url}`);
+        const networkAddress = await networkReachableAddress(port);
+        // Only a slot still running this same server counts: it may have been stopped or restarted while this awaited.
+        if (networkAddress && slot.state === 'running' && slot.port === port) {
+          slot.networkWarning = `This server is also reachable from your network: ${networkAddress}:${port}`;
+          say(slot, 'warn', slot.networkWarning);
+          bump(slot.login);
+        }
       } else if (Date.now() - startedAt > startupTimeoutMs) {
         slot.failure = { kind: 'timeout', message: `The dev server did not start answering within ${Math.round(startupTimeoutMs / 1000)} seconds.` };
         clearTimers(slot);
@@ -285,6 +322,7 @@ export function createDevServerService({
     release(slot);
     slot.pid = null;
     slot.url = null;
+    slot.networkWarning = null;
     const wasStarting = slot.state === 'starting';
     const requested = slot.stopping;
     slot.child = null;

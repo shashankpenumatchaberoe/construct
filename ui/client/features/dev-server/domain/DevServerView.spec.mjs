@@ -5,7 +5,7 @@ import { buildDevServerView, describeBranch, projectName } from './DevServerView
 const command = { script: 'dev', text: 'vite', display: 'npm run dev' };
 const idle = {
   ok: true, version: 0, state: 'not-running', refusal: null, command, root: '/ws/storefront', port: null, url: null, pid: null,
-  startedAt: null, failure: null, branch: 'main', branchKind: 'other',
+  startedAt: null, failure: null, networkWarning: null, branch: 'main', branchKind: 'other',
 };
 const opts = { acknowledged: false, confirming: false, busy: false };
 const view = (patch = {}, o = {}) => buildDevServerView({ ...idle, ...patch }, { ...opts, ...o });
@@ -49,6 +49,13 @@ test('starting can be stopped and points at the log; running offers Restart and 
   const running = view({ state: 'running', port: 5173, url: 'http://127.0.0.1:5173/' });
   assert.deepEqual(running.running, { url: 'http://127.0.0.1:5173/', port: 5173 });
   assert.deepEqual([running.canStop, running.canRestart, running.canStart], [true, true, false]);
+});
+
+test('running also reachable from the network (#557) carries the warning through; loopback-only running has none', () => {
+  const loopbackOnly = view({ state: 'running', port: 5173, url: 'http://127.0.0.1:5173/', networkWarning: null });
+  assert.equal(loopbackOnly.networkWarning, null);
+  const lanReachable = view({ state: 'running', port: 5173, url: 'http://127.0.0.1:5173/', networkWarning: 'This server is also reachable from your network: 10.0.0.5:5173' });
+  assert.equal(lanReachable.networkWarning, 'This server is also reachable from your network: 10.0.0.5:5173');
 });
 
 test('port busy offers "Use port N" only when a free port was found; outside the workspace offers no start', () => {

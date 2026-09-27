@@ -2121,6 +2121,7 @@ button:disabled {
 .dev-server__title { margin: 0 0 var(--sp-1); font-weight: 600; color: var(--text); }
 .dev-server__message { margin: 0 0 var(--sp-2); color: var(--text); overflow-wrap: anywhere; }
 .dev-server__command { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.dev-server__network-warning { margin: 0 0 var(--sp-2); padding: var(--sp-2); border: 1px solid var(--warn); background: var(--warn-soft); border-radius: var(--r-md); color: var(--text); overflow-wrap: anywhere; }
 .dev-server__confirm { margin: 0 0 var(--sp-2); padding: var(--sp-2); border: 1px solid var(--warn); background: var(--warn-soft); border-radius: var(--r-md); }
 .dev-server__confirm p { margin: 0 0 var(--sp-2); }
 .dev-server__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
