@@ -213,6 +213,25 @@ test('generateController throws a clear usage error when the PageProps file does
   });
 });
 
+// #677: create.controller.bind into a feature that does not exist at all -- the missing feature
+// itself is scaffolded first (ensureFeatureExists, generators.mjs, same as every other create.*
+// flow), but --bind's own prerequisite (an already-generated page/hook) is a separate, already-
+// clear requirement this doesn't create, so it still refuses just as before. The empty scaffold
+// is real, though: the feature no longer silently stays a bare, unscaffolded folder.
+test('generateController into a feature that does not exist at all scaffolds the (empty) feature but still refuses to bind, writing no controller (#677)', () => {
+  const dir = makeTempDir('construct-controller-test-');
+  fs.writeFileSync(path.join(dir, 'architecture.yml'), 'version: 1\npreset: strict-nextjs\nproject:\n  framework: nextjs\nfeatures:\n  root: features\n');
+  assert.throws(() => generateController(dir, 'Checkout', 'nope'), (err) => {
+    assert.ok(err instanceof ConstructError);
+    assert.equal(err.exitCode, EXIT_CODES.USAGE_ERROR);
+    assert.match(err.message, /PageProps file not found/);
+    return true;
+  });
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'nope', 'index.ts')));
+  assert.ok(fs.existsSync(path.join(dir, 'features', 'nope', 'types.ts')));
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'nope', 'controllers', 'CheckoutController.tsx')), false);
+});
+
 // ---- CONTROLLER-001 ---------------------------------------------------------
 
 test('CONTROLLER-001: a controller calling fetch() directly is flagged', () => {

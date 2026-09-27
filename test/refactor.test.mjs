@@ -53,6 +53,27 @@ test('moveLayerFile throws if the source file does not exist', () => {
   assert.throws(() => moveLayerFile(dir, 'checkout', 'Nope', 'domain', 'service'), ConstructError);
 });
 
+// #677 sweep: refactor.move/rename assume the unit (and so the feature) already exists -- the
+// "reverse case" the issue also asks to check. Already correct: a feature that was never created
+// refuses clearly, with nothing written, rather than a confusing SLICE-001 later.
+test('moveLayerFile into a feature that does not exist at all refuses clearly, nothing written (#677, already correct)', () => {
+  const dir = tmpProject();
+  assert.throws(
+    () => moveLayerFile(dir, 'nope', 'Foo', 'domain', 'service'),
+    (e) => e instanceof ConstructError && /No domain file found for "Foo" in feature "nope"/.test(e.message),
+  );
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'nope')), false);
+});
+
+test('renameLayerFile into a feature that does not exist at all refuses clearly, nothing written (#677, already correct)', () => {
+  const dir = tmpProject();
+  assert.throws(
+    () => renameLayerFile(dir, 'nope', 'Foo', 'Bar', 'domain'),
+    (e) => e instanceof ConstructError && /No domain file found for "Foo" in feature "nope"/.test(e.message),
+  );
+  assert.equal(fs.existsSync(path.join(dir, 'features', 'nope')), false);
+});
+
 test('moveLayerFile throws if the target already exists', () => {
   const dir = tmpProject();
   createFeature(dir, 'checkout');

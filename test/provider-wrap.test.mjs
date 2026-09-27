@@ -145,6 +145,9 @@ test('wrapProvider refuses, with the reason, what it cannot edit safely: nothing
   refuse({ provider: 'useNoSuchProvider' }, /"useNoSuchProvider" is not a provider of this project\. The providers are: useAuthProvider, useCartProvider\./);
   refuse({ name: 'GhostPage' }, /Nothing in the cart feature's controllers renders <GhostPage \/>/);
   refuse({ feature: 'auth', provider: 'useAuthProvider' }, /Nothing in the auth feature's controllers renders <CartPage \/>/);
+  // #677 sweep: a feature that was never created at all (not just one with no controllers dir)
+  // refuses the same clear way -- already correct, nothing SLICE-001-shaped.
+  refuse({ feature: 'nope' }, /(is not a provider of this project|cannot be used here|Nothing in the nope feature's controllers renders)/);
   refuse({ name: 'cartPage' }, /not a PascalCase/);
   refuse({ feature: '../x' }, /Invalid feature name/);
   refuse({ provider: '' }, /Say which provider/);
