@@ -139,6 +139,20 @@ test('fixture architecture-valid-singular-layers: layers: override is honored, z
   assert.deepEqual(r.violations.filter((v) => v.rule === 'SOC-001' || v.rule === 'SLICE-001'), []);
 });
 
+// #724 -- internalUnitKind (SLICE-004's "which internal-unit folder is this?" helper) used to
+// hardcode the plural `(components|hooks)` regex, so a project with singular `component/`/`hook/`
+// folders (via the SAME `layers:` override honored by SOC-001/SLICE-001 above, #699) never matched
+// and SLICE-004 was silently skipped for its component/provider re-exports. The fixture's
+// features/widget/index.ts re-exports WidgetComponent directly from its singular `component/`
+// folder -- this must still be flagged.
+test('fixture architecture-valid-singular-layers: a direct re-export from the singular component/ folder still fires SLICE-004', () => {
+  const r = validateSeparationOfConcerns(path.join(fixturesRoot, 'architecture-valid-singular-layers'));
+  const v = r.violations.filter((x) => x.rule === 'SLICE-004');
+  assert.equal(v.length, 1);
+  assert.equal(v[0].file, 'features/widget/index.ts');
+  assert.match(v[0].message, /WidgetComponent/);
+});
+
 test('fixture soc-cross-feature: exactly one SLICE-002 violation fires', () => {
   const r = validateSeparationOfConcerns(path.join(fixturesRoot, 'soc-cross-feature'));
   assert.equal(r.violations.length, 1);

@@ -213,10 +213,21 @@ const isProviderHookName = (name) => typeof name === 'string' && PROVIDER_HOOK_N
 const specifierBaseName = (specifier) => (specifier.split('/').pop() || '').replace(/\.(tsx?|jsx?)$/, '');
 
 /** 'components' | 'hooks' | null — which internal-unit folder of the CURRENT feature a resolved,
- * feature-relative specifier path (see resolveSpecifier) sits under. */
-function internalUnitKind(resolved, featuresRoot) {
-  const m = resolved && resolved.match(new RegExp(`^${escapeRegex(featuresRoot)}/[^/]+/(components|hooks)/`));
-  return m ? m[1] : null;
+ * feature-relative specifier path (see resolveSpecifier) sits under. Reads the component/hook
+ * folder names from THIS project's own (possibly `layers:`-overridden) layer graph, mirroring
+ * requiredFoldersOf/knownFoldersOf above (#699/#724) — a project with singular `component/`/`hook/`
+ * folders is recognized instead of only the plural framework defaults. The return value stays the
+ * semantic 'components'/'hooks' kind label (used throughout this file's SLICE-004 logic below),
+ * independent of the actual folder name on disk. */
+function internalUnitKind(resolved, featuresRoot, config) {
+  if (!resolved) return null;
+  const componentFolder = layerFolderOf(config.layers?.component);
+  const hookFolder = layerFolderOf(config.layers?.hook);
+  const folders = [componentFolder, hookFolder].filter(Boolean);
+  if (!folders.length) return null;
+  const m = resolved.match(new RegExp(`^${escapeRegex(featuresRoot)}/[^/]+/(${folders.map(escapeRegex).join('|')})/`));
+  if (!m) return null;
+  return m[1] === componentFolder ? 'components' : 'hooks';
 }
 
 /** Does SLICE-004 apply to an export whose origin is `origin` (`{kind, baseName}`), given `name`
@@ -251,7 +262,7 @@ function checkDistinctWrapperExports(config, out, root, featuresRoot, relFile, s
   for (const node of ast.body) {
     if (node.type !== 'ImportDeclaration' || node.importKind === 'type') continue;
     const resolved = resolveSpecifier(relFile, node.source.value, featuresRoot);
-    const kind = internalUnitKind(resolved, featuresRoot);
+    const kind = internalUnitKind(resolved, featuresRoot, config);
     if (!kind) continue;
     const baseName = specifierBaseName(node.source.value);
     for (const spec of node.specifiers) {
@@ -289,7 +300,7 @@ function checkDistinctWrapperExports(config, out, root, featuresRoot, relFile, s
   for (const node of ast.body) {
     if (node.type === 'ExportAllDeclaration') {
       const resolved = resolveSpecifier(relFile, node.source.value, featuresRoot);
-      const kind = internalUnitKind(resolved, featuresRoot);
+      const kind = internalUnitKind(resolved, featuresRoot, config);
       if (!kind) continue;
       const baseName = specifierBaseName(node.source.value);
       if (slice004Applies({ kind, baseName }, baseName)) report(baseName, kind, node.loc.start.line);
@@ -303,7 +314,7 @@ function checkDistinctWrapperExports(config, out, root, featuresRoot, relFile, s
       // `export { A as B } from '...'` / `export { A } from '...'` -- a from-export can never be
       // a wrapper (the syntax has no room to call anything); it is always a bare forward.
       const resolved = resolveSpecifier(relFile, node.source.value, featuresRoot);
-      const kind = internalUnitKind(resolved, featuresRoot);
+      const kind = internalUnitKind(resolved, featuresRoot, config);
       if (!kind) continue;
       const baseName = specifierBaseName(node.source.value);
       for (const spec of node.specifiers || []) {
