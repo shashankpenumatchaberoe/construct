@@ -26,6 +26,8 @@ Run `construct repl` for an interactive shell with built-in help (`help`, `help 
 
 Every command takes `--dir <path>`, so you can run it from anywhere: it finds the nearest `architecture.yml` above that path and never touches anything outside that project. The full list of commands and flags is in the [CLI reference](@developers/cli-reference/), generated from the command's own usage text so it cannot drift.
 
+A package built on Construct can add its own `construct <name>` command without touching Construct's source: it declares a `construct.commands` field in its own `package.json` pointing at a small module of command definitions, and `construct` picks it up once the package is installed alongside it. See `docs/CLI-COMMAND-REGISTRY.md` in the repository for the contract.
+
 ## What you can rely on in a script
 
 - **Exit codes.** `0` success (warnings do not fail a run), `1` one or more errors, `2` a usage error, `3` an internal error, including a rejected model reply.

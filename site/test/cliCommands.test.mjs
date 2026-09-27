@@ -8,7 +8,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const blobUrl = (f) => `https://github.com/o/r/blob/main/${f}`;
 
 test('collectCliCommands: never falls behind what bin/construct.mjs actually dispatches', async () => {
-  const dispatched = dispatchedCommandNames(REPO_ROOT);
+  const dispatched = await dispatchedCommandNames(REPO_ROOT);
   assert.ok(dispatched.length > 10, `expected many dispatched commands, got ${dispatched.length}`);
   const { commands } = await collectCliCommands(REPO_ROOT);
   const names = commands.map((c) => c.name);

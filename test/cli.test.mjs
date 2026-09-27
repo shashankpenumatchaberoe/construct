@@ -577,3 +577,68 @@ test('import --plan (batch) prints a non-negative duration per unit and an overa
   assert.ok(totalMatch, `expected a "Total: Xs" line, got:\n${res.stdout}`);
   assert.ok(Number(totalMatch[1]) >= 0);
 });
+
+// ---- #700: command registry -- packages/cli/construct.mjs dispatches through a registry now instead of a
+// hand-written if-chain, and an installed package can contribute its own `construct <name>` command via a
+// "construct" field in its own package.json (packages/core/plugin-commands.mjs), with no edit to Construct's
+// source. These tests exercise that end to end, the same way a real dependency would be found.
+
+/** Writes a minimal fixture package under `<dir>/node_modules/<pkgName>` that declares one command via its
+ * own package.json's `construct.commands` field -- the exact discovery contract `plugin-commands.mjs` reads. */
+function installFixtureCommandPackage(dir, { pkgName = 'construct-trace-fixture', commandName = 'trace-fixture' } = {}) {
+  const pkgDir = path.join(dir, 'node_modules', pkgName);
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(pkgDir, 'package.json'),
+    JSON.stringify({ name: pkgName, version: '1.0.0', construct: { commands: './construct-commands.mjs' } }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(pkgDir, 'construct-commands.mjs'),
+    `export const commands = [{ name: ${JSON.stringify(commandName)}, summary: 'A fixture command from an installed package', usage: 'construct ${commandName} [args...]', handler: (args) => { console.log('fixture command ran with: ' + JSON.stringify(args)); } }];\n`,
+  );
+  return pkgDir;
+}
+
+test('#700: an installed package\'s construct.commands field makes its command dispatchable, no Construct edit', () => {
+  const dir = emptyProjectDir();
+  installFixtureCommandPackage(dir);
+  const res = run(['trace-fixture', 'a', 'b'], dir);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.match(res.stdout, /fixture command ran with: \["a","b"\]/);
+});
+
+test('#700: an installed package\'s command is listed in construct --help', () => {
+  const dir = emptyProjectDir();
+  installFixtureCommandPackage(dir);
+  const res = run(['--help'], dir);
+  assert.equal(res.status, EXIT_CODES.OK);
+  assert.match(res.stdout, /construct trace-fixture/);
+  assert.match(res.stdout, /A fixture command from an installed package/);
+});
+
+test('#700: no command / --help still exits/prints exactly as before (usage error with no command, OK with --help)', () => {
+  const noCmd = run([]);
+  assert.equal(noCmd.status, EXIT_CODES.USAGE_ERROR);
+  assert.match(noCmd.stdout, /Commands:/);
+  const help = run(['--help']);
+  assert.equal(help.status, EXIT_CODES.OK);
+  assert.match(help.stdout, /Commands:/);
+  assert.match(help.stdout, /Registered commands/);
+});
+
+test('#700: a plugin command found under --dir\'s node_modules is dispatchable even when cwd is elsewhere', () => {
+  const outer = emptyProjectDir();
+  const target = emptyProjectDir();
+  installFixtureCommandPackage(target, { pkgName: 'construct-trace-fixture-2', commandName: 'trace-fixture-2' });
+  const res = run(['trace-fixture-2', '--dir', target], outer);
+  assert.equal(res.status, EXIT_CODES.OK, res.stderr);
+  assert.match(res.stdout, /fixture command ran with:/);
+});
+
+test('#700: a plugin command cannot shadow a built-in (built-in resolves before discovery ever runs)', () => {
+  const dir = emptyProjectDir();
+  installFixtureCommandPackage(dir, { pkgName: 'construct-bad-fixture', commandName: 'validate' });
+  const res = run(['validate'], dir);
+  assert.notEqual(res.status, EXIT_CODES.INTERNAL_ERROR);
+  assert.doesNotMatch(res.stderr, /already registered/);
+});
