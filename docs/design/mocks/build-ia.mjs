@@ -184,6 +184,109 @@ const gitConnect = frame({
   bot: bottom('Processes', '<div style="padding:14px;color:var(--text-muted)">No processes yet. Running and finished processes for a project appear here, on every screen.</div>', 110, { p: '0', a: '0' }), botH: 110,
 });
 
+/* ------------------------------------------------ 6b Git: Changes tab, stage/unstage, diff, Commit tab (#331, part of #277) */
+const sessionBanner = (mode = 'every save') => `<div style="padding:8px 10px;border-bottom:1px solid var(--border-subtle)">
+  <div style="font:600 12px var(--mono)">cockpit/refund-a-delivered-order</div>
+  <div style="color:var(--text-faint);font-size:11px;margin-top:2px">Session branch (#283) &middot; save 12 &middot; auto-commit: ${mode}</div>
+</div>`;
+const cbRow = (layer, name, meta, on = true) => `<div class="art"><span class="cb ${on ? 'on' : ''}" aria-hidden="true">${on ? '&#10003;' : ''}</span><span>${L(layer)} ${name}</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">${meta}</span></div>`;
+const diffLines = [['12', ' import { useRefundForm } from "../hooks/useRefundForm";', ''], ['13', '+import { orderService } from "@/features/orders/services/orderService";', 'add'], ['14', ' export function RefundForm() {', ''], ['15', '+  const orders = orderService.list();', 'add'], ['16', '   return <AmountField />;', '']];
+const diffBlock = `<div class="code">${diffLines.map((l) => `<div class="ln ${l[2]}"><i>${l[0]}</i><span>${l[1].replace(/</g, '&lt;')}</span></div>`).join('')}</div>`;
+
+const gitChangesLeft = (grouping = 1) => `<div class="pane-h"><span class="title">Git</span><span class="spacer"></span><button class="icon-btn" aria-label="Fetch">&#8635;</button><button class="icon-btn">&laquo;</button></div>${tabs([['Changes', ['11', 'acc']], ['Branches'], ['PRs', ['3', '']], ['Commits']], 'Changes')}
+${sessionBanner()}
+<div style="display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border-subtle)">${['By feature', 'By layer', 'Files'].map((g, i) => `<button class="tg" aria-pressed="${i === grouping}">${g}</button>`).join('')}</div>
+<div class="scroll">
+ <details class="dt" open><summary>Staged &middot; ready to commit <span class="c">4</span></summary>
+  <div style="padding:2px 0 6px"><button class="btn sm" style="margin:2px 0 4px 8px">Unstage all</button>
+  ${cbRow('workflow', 'refundMachine.ts', '+64')}
+  ${cbRow('component', 'RefundForm.tsx', '+38 -2')}
+  ${cbRow('component', 'AmountField.tsx', '+3')}
+  ${cbRow('domain', 'RefundPolicy.ts', '+11')}</div></details>
+ <details class="dt" open><summary>Not staged <span class="c">7</span></summary>
+  <div style="padding:2px 0 6px"><button class="btn sm" style="margin:2px 0 4px 8px">Stage all</button>
+  ${cbRow('page', 'orders/[id]/refund/page.tsx', '+9 -1', false)}
+  ${cbRow('service', 'orderService.ts', '+5', false)}
+  ${cbRow('hook', 'useRefundForm.ts', '+22', false)}</div></details>
+</div>`;
+
+const gitChangesMid = `<div class="canvas-tb"><span class="crumbs">Git &rsaquo; Changes &rsaquo; <b>RefundForm.tsx</b></span><span class="spacer"></span><span class="tag det">Diff computed by git, not a model</span></div>
+<div class="scroll">${diffBlock}
+<div class="callout info"><span>&#9432;</span><div class="grow"><b>Staged as a whole file</b><small>Construct stages by file, not by hunk (the same block commit-on-save already uses), so what you commit here is exactly what this diff shows &mdash; reuses the Pages editor's unified diff view (<code>DiffView.tsx</code>), not a new diff renderer.</small></div></div></div>`;
+
+const commitBox = `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+  <div class="saveind ok" style="margin-bottom:4px">&#10003; Commit on save: every save</div>
+  <div style="color:var(--text-faint);font-size:11px">Settings &middot; Git controls the mode, prefix and branch naming (#283)</div>
+ </div>
+ <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+  <label style="display:block;font-size:11px;color:var(--text-faint);margin-bottom:4px">Commit message &middot; 4 files staged</label>
+  <div class="field" style="height:auto;padding:6px 8px;white-space:normal">CON refund: workflow, component, domain &middot; 3 features, 4 layers, 4 files</div>
+  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary sm">Commit staged</button><button class="btn sm">Amend last</button></div>
+ </div>`;
+
+const pushReady = `<div style="padding:10px 12px">
+  <div style="display:flex;align-items:center;gap:8px"><b style="font-size:12px">Push / Pull</b><span class="tag det">3 ahead of origin/main</span></div>
+  <p style="color:var(--text-muted);font-size:12px;margin:6px 0">Pushing sends this session branch to GitHub. Nothing pushes on its own &mdash; the one thing #283 deliberately left manual.</p>
+  <div style="display:flex;gap:8px"><button class="btn primary sm">Push</button><button class="btn sm">Pull</button></div>
+</div>`;
+
+const pushBlocked = `<div style="padding:10px 12px">
+  <div style="display:flex;align-items:center;gap:8px"><b style="font-size:12px">Push</b><span class="tag" style="background:var(--surface-3);color:var(--text-muted)">Not connected</span></div>
+  <p style="color:var(--text-muted);font-size:12px;margin:6px 0">This Cockpit has no GitHub push credential yet (#638, waiting on the owner registering a GitHub App). Local commits are never blocked by this.</p>
+  <button class="btn sm" disabled>Connect GitHub to push</button>
+  <p style="color:var(--text-faint);font-size:11px;margin-top:8px">Meanwhile: <code>git push</code> from a terminal still works if this machine already has its own git credentials &mdash; this panel does not stop that.</p>
+</div>`;
+
+const gitChanges = frame({
+  screen: 'Git', lw: 356,
+  left: gitChangesLeft(1),
+  mid: gitChangesMid,
+  right: `<div class="pane-h"><span class="title">Review and commit</span></div>${tabs([['Findings', ['2', '']], ['Detail'], ['Plan match'], ['Commit']], 'Commit')}<div class="scroll">${commitBox}${pushReady}</div>`,
+  bot: bottom('Processes', procTable, 134, { p: '2', a: '0' }), botH: 134,
+});
+
+const gitCommitBlocked = frame({
+  screen: 'Git', lw: 356,
+  left: gitChangesLeft(1),
+  mid: gitChangesMid,
+  right: `<div class="pane-h"><span class="title">Review and commit</span></div>${tabs([['Findings', ['2', '']], ['Detail'], ['Plan match'], ['Commit']], 'Commit')}<div class="scroll">${commitBox}${pushBlocked}</div>`,
+  bot: bottom('Processes', procTable, 134, { p: '2', a: '0' }), botH: 134,
+});
+
+const gitBranches = frame({
+  screen: 'Git', lw: 356,
+  left: `<div class="pane-h"><span class="title">Git</span><span class="spacer"></span><button class="icon-btn" aria-label="Fetch">&#8635;</button><button class="icon-btn">&laquo;</button></div>${tabs([['Changes', ['11', '']], ['Branches'], ['PRs', ['3', '']], ['Commits']], 'Branches')}
+   <div class="scroll"><div class="sect">Session branch</div>
+   <div class="dr sel"><span class="n">cockpit/refund-a-delivered-order</span><span class="st ready">Current &middot; save 12</span><span class="s">auto-commit: every save</span></div>
+   <div class="sect" style="margin-top:8px">New branch</div>
+   <div style="display:flex;gap:6px;padding:0 10px 10px"><span class="field" style="flex:1;color:var(--text-faint)">e.g. fix-cart-rounding</span><button class="btn sm primary">Create</button></div>
+   <div class="sect">Other branches &middot; 3</div>
+   <div class="dr"><span class="n">main</span><span class="s">up to date</span></div><button class="btn sm" style="margin:0 10px 8px">Switch</button>
+   <div class="dr"><span class="n">cockpit/guest-checkout</span><span class="s">4 files ahead &middot; save 6</span></div><button class="btn sm" style="margin:0 10px 8px">Switch</button>
+   <div class="dr"><span class="n">cockpit/fix-cart-rounding</span><span class="s">2 files ahead &middot; save 2</span></div><button class="btn sm" style="margin:0 10px 8px">Switch</button></div>`,
+  mid: `<div class="stage">${stateCard('&#8646;', 'Switching branches', 'Pick a branch on the left to check it out. A dirty working tree is offered a choice first (same DirtyTreePrompt #283 already shows on save), never silently discarded or force-switched.', '<div class="slotlab" style="position:static;display:inline-block">Local operation &middot; no sign-in needed on loopback</div>')}</div>`,
+  right: `<div class="pane-h"><span class="title">Review and commit</span></div>${tabs([['Findings', ['0', '']], ['Detail'], ['Plan match'], ['Commit']], 'Commit')}<div class="scroll">${commitBox}${pushReady}</div>`,
+  bot: bottom('Processes', procTable, 134, { p: '2', a: '0' }), botH: 134,
+});
+
+const gitClean = frame({
+  screen: 'Git', lw: 356,
+  left: `<div class="pane-h"><span class="title">Git</span><span class="spacer"></span><button class="icon-btn" aria-label="Fetch">&#8635;</button><button class="icon-btn">&laquo;</button></div>${tabs([['Changes', null], ['Branches'], ['PRs', ['3', '']], ['Commits']], 'Changes')}
+   ${sessionBanner('manual')}
+   <div class="scroll" style="padding:14px;color:var(--text-muted)">Nothing to stage or commit. The working tree matches <code>HEAD</code> on this branch. Auto-commit is set to manual here, so nothing will commit on its own even after your next save &mdash; press Commit when you have something to record.</div>`,
+  mid: `<div class="stage">${stateCard('&#10003;', 'Nothing to commit', 'The working tree matches the last commit on this branch. Keep editing, or switch branches to review something else.', '')}</div>`,
+  right: `<div class="pane-h"><span class="title">Review and commit</span></div>${tabs([['Findings', null], ['Detail'], ['Plan match'], ['Commit']], 'Commit')}<div class="scroll">
+   <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+    <div class="saveind" style="margin-bottom:4px;color:var(--text-muted)">Commit on save: manual &mdash; nothing commits until you press Commit</div>
+   </div>
+   <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+    <label style="display:block;font-size:11px;color:var(--text-faint);margin-bottom:4px">Last commit</label>
+    <div style="font:12px var(--mono)">CON guest-checkout: page, hook &middot; 2 features, 3 layers, 4 files</div>
+    <div style="color:var(--text-faint);font-size:11px;margin-top:4px">on <code>cockpit/guest-checkout</code></div>
+   </div>${pushReady}</div>`,
+  bot: bottom('Processes', '<div style="padding:14px;color:var(--text-muted)">No processes running.</div>', 110, { p: '0', a: '0' }), botH: 110,
+});
+
 /* ------------------------------------------------ 7 Narrow */
 const phone = (title, tab, body, extra = '') => `<div><h3 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">${title}</h3><div class="narrow" style="position:relative;height:780px">
  <div class="topbar" style="height:44px;flex:none"><div class="brand"><i></i>Cockpit</div><span class="spacer"></span><span class="pill run"><span class="spin"></span>2</span><span class="avatar" aria-label="Account">SP</span></div>
@@ -197,8 +300,22 @@ const narrow = `<div class="sheet3" style="grid-template-columns:repeat(3,390px)
  ${phone('Account menu (sheet)', 'Stage', `<div style="padding:14px;color:var(--text-muted)">Stage content is dimmed behind the sheet.</div>`, `<div class="menu" style="top:auto;bottom:0;left:0;right:0;width:auto;border-radius:var(--r-lg) var(--r-lg) 0 0">${menuInner}</div>`)}
 </div>`;
 
+/* States: sign-in gate vs. push-credential gate (#331), and narrow */
+const gitStates = `<div class="hh">Git changes: sign-in gate vs. push-credential gate<small>Two different reasons Push can be disabled, so the message always names the real one (principles.md #9, honest error states).</small></div>
+<div class="sheet3">
+ <div><h3>Read-only always works</h3>
+  ${stateCard('&#128065;', 'Viewing and diffing, no session', 'Changes, diff and the changed-file tree read local git only and work on loopback without signing in &mdash; the same posture #283 already has for commit-on-save.')}</div>
+ <div><h3>Hosted, not signed in</h3>
+  ${stateCard('&#128274;', 'Sign in to push', 'This Cockpit requires a signed-in session (not loopback). Staging and committing locally still work; Push and Pull are disabled until you sign in with GitHub.', '<div><button class="btn primary sm">Sign in with GitHub</button></div>')}</div>
+ <div><h3>Signed in, no push credential (#638)</h3>
+  ${stateCard('&#128279;', 'Connect GitHub to push', 'Signed in, but this Cockpit instance has no GitHub App credential to push with yet. The button stays visible and named honestly rather than hidden.', '<button class="btn sm" disabled>Connect GitHub to push</button>')}</div>
+</div>`;
+
 const runProcs = () => `<table><tr><th>Process</th><th>Project</th><th>Status</th><th></th></tr>
  <tr><td><b>dev server &middot; storefront</b> <span class="tag det">Deterministic</span></td><td>storefront (inside the workspace)</td><td>running on :5173 &middot; 14 min</td><td><button class="btn sm">Restart</button> <button class="btn sm danger">Stop</button></td></tr></table>`;
+
+/* Git narrow (390 px): Changes as one panel, own top-level mock so it is not clipped under other content (#331) */
+const gitNarrow = `<div class="sheet3" style="grid-template-columns:390px;justify-content:start">${phone('Git &middot; Changes, as one panel', 'Changes', `${tabs([['Changes', ['11', 'acc']], ['Branches'], ['Commit']], 'Changes')}${sessionBanner()}<div class="scroll" style="max-height:600px"><details class="dt" open><summary>Staged <span class="c">4</span></summary>${cbRow('component', 'RefundForm.tsx', '+38 -2')}</details><details class="dt" open><summary>Not staged <span class="c">7</span></summary>${cbRow('page', 'refund/page.tsx', '+9 -1', false)}</details></div>`)}</div>`;
 
 /* ================================================= POC parity (preview-first Pages / Components), quiet IDE feel */
 // Density rule: at rest the tree shows at most ONE dot per row; badges, impact, tests, findings and Notes
@@ -834,8 +951,8 @@ const scopeStates = `
 Object.assign(pocOut, { 'ia-scope': scopeReadMock, 'ia-scope-link': scopeLinkMock, 'ia-scope-bound': scopeBoundMock, 'ia-scope-states': scopeStates });
 Object.assign(pocTitles, { 'ia-scope': 'Pages: Scope tab, read-only (Providers / this file&rsquo;s own props / other units&rsquo; outputs a prop could bind to)', 'ia-scope-link': 'Pages: linking mode, a prop&rsquo;s Bind... pressed, type-matching candidates highlighted', 'ia-scope-bound': 'Pages: bound, mechanical rewrite and per-file approval, existing auto-map shown alongside', 'ia-scope-states': 'Scope: empty, loading, error, no-fit, keyboard focus, drag and deferred multi-field states' });
 
-const out = { 'ia-features': features, 'ia-account-menu': menuMock, 'ia-slot-matrix': matrix, 'ia-notes-states': drafts, 'ia-no-project': noProj, 'ia-git': git, 'ia-git-connect': gitConnect, 'ia-narrow': narrow };
-const titles = { 'ia-features': 'Features screen: notes, impact, plan, processes', 'ia-account-menu': 'Account menu: settings, local model, theme, help, sign out', 'ia-slot-matrix': 'Five screens, four slots', 'ia-notes-states': 'Notes: durable states', 'ia-no-project': 'No project: where the Open a project prompt sits', 'ia-git': 'Git screen: PRs and review inside the shell', 'ia-git-connect': 'Git with no remote: where Connect remote and Clone sit', 'ia-narrow': 'Narrow (390 px): one panel at a time' };
+const out = { 'ia-features': features, 'ia-account-menu': menuMock, 'ia-slot-matrix': matrix, 'ia-notes-states': drafts, 'ia-no-project': noProj, 'ia-git': git, 'ia-git-connect': gitConnect, 'ia-git-changes': gitChanges, 'ia-git-commit-blocked': gitCommitBlocked, 'ia-git-branches': gitBranches, 'ia-git-clean': gitClean, 'ia-git-states': gitStates, 'ia-git-narrow': gitNarrow, 'ia-narrow': narrow };
+const titles = { 'ia-features': 'Features screen: notes, impact, plan, processes', 'ia-account-menu': 'Account menu: settings, local model, theme, help, sign out', 'ia-slot-matrix': 'Five screens, four slots', 'ia-notes-states': 'Notes: durable states', 'ia-no-project': 'No project: where the Open a project prompt sits', 'ia-git': 'Git screen: PRs and review inside the shell', 'ia-git-connect': 'Git with no remote: where Connect remote and Clone sit', 'ia-git-changes': 'Git: Changes tab, stage/unstage, diff, Commit tab (push ready)', 'ia-git-commit-blocked': 'Git: Commit tab, push blocked on no GitHub credential (#638)', 'ia-git-branches': 'Git: Branches tab, session branch, switch and create', 'ia-git-clean': 'Git: Changes tab, clean tree (nothing to stage)', 'ia-git-states': 'Git: sign-in gate vs. push-credential gate', 'ia-git-narrow': 'Git: Changes, narrow (390 px), one panel at a time', 'ia-narrow': 'Narrow (390 px): one panel at a time' };
 Object.assign(out, pocOut); Object.assign(titles, pocTitles);
 for (const [k, v] of Object.entries(out)) writeFileSync(join(here, `${k}.html`), page(titles[k], v));
 console.log('ia mocks written');

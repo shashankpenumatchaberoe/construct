@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Git: sign-in gate vs. push-credential gate - Concept</title>
+<link rel="stylesheet" href="mock.css"><link rel="stylesheet" href="ia.css">
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') || 'dark';</script>
+</head><body>
+<div class="concept">Concept - not implemented <span>Git: sign-in gate vs. push-credential gate</span></div>
+<div class="hh">Git changes: sign-in gate vs. push-credential gate<small>Two different reasons Push can be disabled, so the message always names the real one (principles.md #9, honest error states).</small></div>
+<div class="sheet3">
+ <div><h3>Read-only always works</h3>
+  <div class="state-card"><div class="ico">&#128065;</div><h5>Viewing and diffing, no session</h5><p>Changes, diff and the changed-file tree read local git only and work on loopback without signing in &mdash; the same posture #283 already has for commit-on-save.</p></div></div>
+ <div><h3>Hosted, not signed in</h3>
+  <div class="state-card"><div class="ico">&#128274;</div><h5>Sign in to push</h5><p>This Cockpit requires a signed-in session (not loopback). Staging and committing locally still work; Push and Pull are disabled until you sign in with GitHub.</p><div><button class="btn primary sm">Sign in with GitHub</button></div></div></div>
+ <div><h3>Signed in, no push credential (#638)</h3>
+  <div class="state-card"><div class="ico">&#128279;</div><h5>Connect GitHub to push</h5><p>Signed in, but this Cockpit instance has no GitHub App credential to push with yet. The button stays visible and named honestly rather than hidden.</p><button class="btn sm" disabled>Connect GitHub to push</button></div></div>
+</div>
+</body></html>

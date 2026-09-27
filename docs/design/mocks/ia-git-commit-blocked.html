@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Git: Commit tab, push blocked on no GitHub credential (#638) - Concept</title>
+<link rel="stylesheet" href="mock.css"><link rel="stylesheet" href="ia.css">
+<script>document.documentElement.dataset.theme = new URLSearchParams(location.search).get('theme') || 'dark';</script>
+</head><body>
+<div class="concept">Concept - not implemented <span>Git: Commit tab, push blocked on no GitHub credential (#638)</span></div>
+
+<div class="shell" style="--lw:356px;grid-template-rows:44px 1fr 134px 24px;position:relative">
+  
+<header class="topbar" role="banner">
+  <div class="brand"><i></i>Cockpit</div>
+  <button class="chip-btn" aria-haspopup="listbox">storefront <span class="sub">main</span> &#9662;</button>
+  <nav class="snav " aria-label="Screens"><a class="" >Features</a><a class="" >Pages</a><a class="" >Components</a><a class="on" aria-current="page">Git <span class="badge">3</span></a><a class="" >Tests</a></nav>
+  <button class="chip-btn palette-trigger"><span>Search or run a command...</span><kbd>Ctrl K</kbd></button>
+  <span class="pill run"><span class="spin"></span>2 running</span>
+  <button class="acct " aria-haspopup="true" aria-expanded="false"><span class="avatar">SP</span>shashank-p &#9662;</button>
+</header>
+  <div class="ia-main">
+    <aside class="pane" aria-label="Left panel: Browse"><div class="pane-h"><span class="title">Git</span><span class="spacer"></span><button class="icon-btn" aria-label="Fetch">&#8635;</button><button class="icon-btn">&laquo;</button></div><div class="tabs" role="tablist"><button role="tab" class="on" aria-selected="true">Changes <span class="badge acc">11</span></button><button role="tab" class="" aria-selected="false">Branches</button><button role="tab" class="" aria-selected="false">PRs <span class="badge ">3</span></button><button role="tab" class="" aria-selected="false">Commits</button></div>
+<div style="padding:8px 10px;border-bottom:1px solid var(--border-subtle)">
+  <div style="font:600 12px var(--mono)">cockpit/refund-a-delivered-order</div>
+  <div style="color:var(--text-faint);font-size:11px;margin-top:2px">Session branch (#283) &middot; save 12 &middot; auto-commit: every save</div>
+</div>
+<div style="display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border-subtle)"><button class="tg" aria-pressed="false">By feature</button><button class="tg" aria-pressed="true">By layer</button><button class="tg" aria-pressed="false">Files</button></div>
+<div class="scroll">
+ <details class="dt" open><summary>Staged &middot; ready to commit <span class="c">4</span></summary>
+  <div style="padding:2px 0 6px"><button class="btn sm" style="margin:2px 0 4px 8px">Unstage all</button>
+  <div class="art"><span class="cb on" aria-hidden="true">&#10003;</span><span><span class="layer workflow">workflow</span> refundMachine.ts</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+64</span></div>
+  <div class="art"><span class="cb on" aria-hidden="true">&#10003;</span><span><span class="layer component">component</span> RefundForm.tsx</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+38 -2</span></div>
+  <div class="art"><span class="cb on" aria-hidden="true">&#10003;</span><span><span class="layer component">component</span> AmountField.tsx</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+3</span></div>
+  <div class="art"><span class="cb on" aria-hidden="true">&#10003;</span><span><span class="layer domain">domain</span> RefundPolicy.ts</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+11</span></div></div></details>
+ <details class="dt" open><summary>Not staged <span class="c">7</span></summary>
+  <div style="padding:2px 0 6px"><button class="btn sm" style="margin:2px 0 4px 8px">Stage all</button>
+  <div class="art"><span class="cb " aria-hidden="true"></span><span><span class="layer page">page</span> orders/[id]/refund/page.tsx</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+9 -1</span></div>
+  <div class="art"><span class="cb " aria-hidden="true"></span><span><span class="layer service">service</span> orderService.ts</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+5</span></div>
+  <div class="art"><span class="cb " aria-hidden="true"></span><span><span class="layer hook">hook</span> useRefundForm.ts</span><span style="margin-left:auto;color:var(--text-faint);font:11px var(--mono)">+22</span></div></div></details>
+</div></aside><div class="resizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
+    <section class="pane mid" aria-label="Center stage"><div class="canvas-tb"><span class="crumbs">Git &rsaquo; Changes &rsaquo; <b>RefundForm.tsx</b></span><span class="spacer"></span><span class="tag det">Diff computed by git, not a model</span></div>
+<div class="scroll"><div class="code"><div class="ln "><i>12</i><span> import { useRefundForm } from "../hooks/useRefundForm";</span></div><div class="ln add"><i>13</i><span>+import { orderService } from "@/features/orders/services/orderService";</span></div><div class="ln "><i>14</i><span> export function RefundForm() {</span></div><div class="ln add"><i>15</i><span>+  const orders = orderService.list();</span></div><div class="ln "><i>16</i><span>   return &lt;AmountField />;</span></div></div>
+<div class="callout info"><span>&#9432;</span><div class="grow"><b>Staged as a whole file</b><small>Construct stages by file, not by hunk (the same block commit-on-save already uses), so what you commit here is exactly what this diff shows &mdash; reuses the Pages editor's unified diff view (<code>DiffView.tsx</code>), not a new diff renderer.</small></div></div></div></section><div class="resizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
+    <aside class="pane" aria-label="Right panel: Inspect"><div class="pane-h"><span class="title">Review and commit</span></div><div class="tabs" role="tablist"><button role="tab" class="" aria-selected="false">Findings <span class="badge ">2</span></button><button role="tab" class="" aria-selected="false">Detail</button><button role="tab" class="" aria-selected="false">Plan match</button><button role="tab" class="on" aria-selected="true">Commit</button></div><div class="scroll"><div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+  <div class="saveind ok" style="margin-bottom:4px">&#10003; Commit on save: every save</div>
+  <div style="color:var(--text-faint);font-size:11px">Settings &middot; Git controls the mode, prefix and branch naming (#283)</div>
+ </div>
+ <div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+  <label style="display:block;font-size:11px;color:var(--text-faint);margin-bottom:4px">Commit message &middot; 4 files staged</label>
+  <div class="field" style="height:auto;padding:6px 8px;white-space:normal">CON refund: workflow, component, domain &middot; 3 features, 4 layers, 4 files</div>
+  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary sm">Commit staged</button><button class="btn sm">Amend last</button></div>
+ </div><div style="padding:10px 12px">
+  <div style="display:flex;align-items:center;gap:8px"><b style="font-size:12px">Push</b><span class="tag" style="background:var(--surface-3);color:var(--text-muted)">Not connected</span></div>
+  <p style="color:var(--text-muted);font-size:12px;margin:6px 0">This Cockpit has no GitHub push credential yet (#638, waiting on the owner registering a GitHub App). Local commits are never blocked by this.</p>
+  <button class="btn sm" disabled>Connect GitHub to push</button>
+  <p style="color:var(--text-faint);font-size:11px;margin-top:8px">Meanwhile: <code>git push</code> from a terminal still works if this machine already has its own git credentials &mdash; this panel does not stop that.</p>
+</div></div></aside>
+  </div>
+  
+<div class="drawer" aria-label="Bottom panel: Run" style="height:134px">
+  <div class="tabs" role="tablist"><button role="tab" class="on" aria-selected="true">Processes <span class="badge acc">2</span></button><button role="tab" class="" aria-selected="false">Approvals <span class="badge ">0</span></button><button role="tab" class="" aria-selected="false">Diagnostics <span class="badge danger">3</span></button><button role="tab" class="" aria-selected="false">Logs</button></div>
+  <div class="body">
+<table><tr><th>Process</th><th>Project</th><th>Step</th><th>Progress</th><th>Who</th><th></th></tr>
+<tr><td><b>plan &middot; refund a delivered order</b></td><td>storefront</td><td>3 of 5 &middot; propose refundMachine</td><td><div class="bar-track"><div class="bar-fill" style="width:60%"></div></div></td><td><span class="tag llm">Local model</span></td><td><button class="btn sm">Pause</button> <button class="btn sm danger">Cancel</button></td></tr>
+<tr><td>research &middot; issue #142</td><td>storefront</td><td>Done &middot; 2 min ago</td><td>Finished</td><td><span class="tag det">Deterministic</span></td><td><button class="btn sm primary">Review 4 files</button></td></tr>
+</table></div>
+</div>
+  <footer class="statusbar"><span class="ok">&#9679; validate: 0 new violations</span><span>Notes saved on this machine</span><span class="spacer"></span><span>qwen2.5-coder:7b</span><span><kbd>F6</kbd> next panel</span><span><kbd>Ctrl J</kbd> bottom panel</span></footer>
+  
+</div>
+</body></html>
