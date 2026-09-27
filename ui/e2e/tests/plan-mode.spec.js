@@ -193,7 +193,7 @@ test.describe.serial('Plan mode (#289, #332)', () => {
   // A reload keeps the note (its address names it) but not which Browser tab was open, so the Notes tab is opened again.
   const reloadToNotes = async (page) => {
     await page.reload();
-    await page.getByRole('complementary', { name: 'Browser' }).getByRole('tab', { name: 'Notes' }).click();
+    await page.getByRole('tablist', { name: 'Browser' }).getByRole('tab', { name: 'Notes' }).click();
   };
   const addListStep = async (page) => {
     await page.getByTestId('plan-add-flow').selectOption('summarize.list');
