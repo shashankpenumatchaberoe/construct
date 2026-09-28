@@ -27,3 +27,7 @@ packages/studio/*.tgz
 packages/tools/dev/benchmark-report.json
 __pycache__/
 *.pyc
+
+# Trace project lives here as a plain directory, developed in its own
+# worktrees; never tracked wholesale on this shared branch.
+/trace/
